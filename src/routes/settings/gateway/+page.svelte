@@ -66,6 +66,11 @@
         getSharedSecret("gateway_frp_token").catch(() => null),
         getSharedSecret("gateway_cloudflare_token").catch(() => null),
       ]);
+      // Passive public networking no longer asks users to distinguish
+      // local/direct/external. A configured publicUrl is sufficient.
+      if (loadedExposure.mode !== "frp" && loadedExposure.mode !== "cloudflare") {
+        loadedExposure.mode = "local";
+      }
       config = loadedConfig;
       exposure = loadedExposure;
       status = loadedStatus;
@@ -239,15 +244,15 @@
           <input class="tx-input" type="number" min="1" max="65535" bind:value={config.localPort} disabled={running} />
         </label>
         <label class="grid gap-1.5 text-sm md:col-span-2">
-          <span>Canonical 公网 URL</span>
+          <span>公网 URL</span>
           <input
             class="tx-input"
             bind:value={config.publicUrl}
             disabled={running}
-            placeholder="https://mcp.example.com（可不带 /mcp）"
+            placeholder="https://mcp.example.com（/mcp 可省略）"
           />
           <span class="text-xs text-[var(--color-text-muted)]">
-            这是 Gateway 的外部身份，也是 OAuth metadata 的基地址；不会从 FRP/Cloudflare 配置自动推导或覆盖。
+            ChatGPT 对外访问这个 Gateway 的地址。普通使用只需要填好这个 HTTPS URL，不需要说明端口映射、反向代理或隧道是怎么实现的。
           </span>
         </label>
         <label class="grid gap-1.5 text-sm">
@@ -286,10 +291,10 @@
         <div>
           <div class="flex items-center gap-2">
             <StatusOrb state={exposureRunning ? "running" : "stopped"} />
-            <h2 class="text-[15px] font-semibold">Public Access</h2>
+            <h2 class="text-[15px] font-semibold">公网访问 · 高级</h2>
           </div>
           <p class="mt-1 max-w-3xl text-sm text-[var(--color-text-muted)]">
-            公网访问方式与 canonical URL 分离。Direct/External 由外部网络设施负责；只有 FRP/Cloudflare 会由 Coding Tools 管理子进程。
+            普通使用无需配置这里：在上方填写公网 URL 即可。只有希望 Coding Tools 自己启动 FRP 或 Cloudflare Tunnel 时才需要选择托管方式。
           </p>
         </div>
         {#if managedExposure}
@@ -329,22 +334,16 @@
 
       <div class="mt-5 grid gap-4 md:grid-cols-2">
         <label class="grid gap-1.5 text-sm">
-          <span>访问方式</span>
+          <span>托管方式</span>
           <select class="tx-input" bind:value={exposure.mode} disabled={exposureRunning}>
-            <option value="local">Local only</option>
-            <option value="direct">Direct / 端口映射</option>
-            <option value="external">External / Nginx / Caddy / VPS</option>
+            <option value="local">不由 Coding Tools 管理</option>
             <option value="frp">Managed FRP</option>
             <option value="cloudflare">Managed Cloudflare Tunnel</option>
           </select>
         </label>
         <div class="tx-info-block text-sm text-[var(--color-text-muted)]">
           {#if exposure.mode === "local"}
-            只提供本地 Gateway，不声明公网传输。
-          {:else if exposure.mode === "direct"}
-            Gateway 直接监听 LAN/WAN，或由路由器做端口映射；Coding Tools 不启动 tunnel 子进程。
-          {:else if exposure.mode === "external"}
-            Nginx、Caddy、VPS、WireGuard、SSH reverse tunnel 等由你自行管理。
+            Coding Tools 不关心公网 URL 背后是端口映射、Nginx、Caddy、VPS 还是其他隧道；健康检查直接验证你填写的公网 URL。
           {:else if exposure.mode === "frp"}
             Coding Tools 启动一个全局 frpc，仅代理 Gateway，而不是每个 Workspace 各启一条线路。
           {:else}
@@ -411,7 +410,7 @@
       <div>
         <h2 class="text-[15px] font-semibold">Gateway 健康检查</h2>
         <p class="mt-1 max-w-3xl text-sm text-[var(--color-text-muted)]">
-          从配置、本地 listener、Public Access provider、公网 /mcp 到 OAuth metadata 逐层验证，最后判断是否达到 ChatGPT-ready。
+          从本地 Gateway、你填写的公网 URL 到 OAuth metadata 逐层验证；只有托管 FRP/Cloudflare 时才额外检查 provider。
         </p>
       </div>
       <button type="button" class="tx-btn-primary" disabled={healthBusy} onclick={checkHealth}>

@@ -78,23 +78,21 @@ pub fn gateway_exposure_status(state: &AppState) -> AppResult<GatewayExposureSta
         }
 
         let (state_name, managed, effective, message) = match mode.as_str() {
-            "local" => (
+            // `local` / `direct` / `external` are retained for backward
+            // compatibility, but passive public access is now determined by
+            // whether a canonical public URL is configured. Users no longer
+            // need to describe how that URL reaches the Gateway.
+            "local" | "direct" | "external" if canonical.is_empty() => (
                 "local",
                 false,
                 String::new(),
-                "仅本机访问，不启动公网暴露进程。".into(),
+                "未配置公网 URL；仅使用本地 Gateway。".into(),
             ),
-            "direct" => (
+            "local" | "direct" | "external" => (
                 "configured",
                 false,
                 canonical.clone(),
-                "由 Gateway 监听地址、端口映射或公网网络直接提供访问。".into(),
-            ),
-            "external" => (
-                "configured",
-                false,
-                canonical.clone(),
-                "公网路由由外部 Nginx/Caddy/VPS/其他设施管理。".into(),
+                "公网 URL 已配置；具体反向代理、端口映射或隧道实现由用户自行管理。".into(),
             ),
             "frp" | "cloudflare" => (
                 "stopped",

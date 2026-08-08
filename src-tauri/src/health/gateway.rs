@@ -85,7 +85,12 @@ pub async fn run_gateway_health_checks(state: &AppState) -> AppResult<GatewayHea
         )
     });
 
-    let public_required = mode != "local";
+    // User intent is expressed by the canonical public URL itself.  Passive
+    // network topology (local/direct/external) must not be another required
+    // user decision: if a URL is configured, validate it. Managed providers
+    // remain special because Coding Tools owns their child process lifecycle.
+    let managed_provider = matches!(mode.as_str(), "frp" | "cloudflare");
+    let public_required = !canonical.is_empty() || managed_provider;
     let canonical_https = canonical.to_ascii_lowercase().starts_with("https://");
     let quick_without_canonical = mode == "cloudflare"
         && exposure_config
@@ -248,23 +253,24 @@ pub async fn run_gateway_health_checks(state: &AppState) -> AppResult<GatewayHea
     });
 
     let (provider_ok, provider_required) = match mode.as_str() {
-        "local" => {
-            items.push(skip_item(
-                "public_provider",
-                "provider",
-                "Public Access Provider",
-                "Local-only 模式".into(),
-            ));
-            (true, false)
-        }
-        "direct" | "external" => {
-            items.push(ok_item(
-                "public_provider",
-                "provider",
-                "Public Access Provider",
-                format!("{} · 由外部网络设施负责", mode),
-            ));
-            (true, true)
+        "local" | "direct" | "external" => {
+            if canonical.is_empty() {
+                items.push(skip_item(
+                    "public_provider",
+                    "provider",
+                    "公网传输",
+                    "未配置公网 URL；按本地模式运行".into(),
+                ));
+                (true, false)
+            } else {
+                items.push(ok_item(
+                    "public_provider",
+                    "provider",
+                    "公网传输",
+                    "公网 URL 由用户提供；无需声明 Direct / External 实现方式".into(),
+                ));
+                (true, true)
+            }
         }
         "frp" | "cloudflare" => {
             let ok = exposure_status.state == "running";
@@ -435,7 +441,7 @@ pub async fn run_gateway_health_checks(state: &AppState) -> AppResult<GatewayHea
         && oauth_metadata_ok;
     let summary = if chatgpt_ready {
         "ChatGPT-ready：本地 Gateway、公网入口和认证检查均通过。".to_string()
-    } else if mode == "local" {
+    } else if canonical.is_empty() && !managed_provider {
         "Local-ready，但尚未配置 ChatGPT 所需的公网 HTTPS 入口。".to_string()
     } else {
         "尚未达到 ChatGPT-ready；请按失败项逐层排查。".to_string()

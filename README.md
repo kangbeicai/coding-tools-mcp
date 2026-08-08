@@ -203,26 +203,17 @@ Ctrl+C
 
 > 旧的“每个工作区独立启动 MCP + 独立公网地址”仍保留为兼容模式。推荐新部署优先使用全局 Gateway；同一端口不能同时被全局 Gateway 和旧工作区 listener 占用。
 
-### 4. 暴露一个公网入口
+### 4. 配置公网入口
 
-公网 URL 和“如何把流量送到 Gateway”是两个独立概念。先为 Gateway 配置 canonical 公网 URL，再在 **Public Access** 中选择实际暴露方式：
-
-| 模式 | 含义 | Coding Tools 是否启动子进程 |
-| --- | --- | --- |
-| `Local only` | 只在服务器本地使用，不声明公网访问 | 否 |
-| `Direct` | Gateway 直接监听 LAN/WAN，或由路由器/NAT 做端口映射 | 否 |
-| `External` | Nginx、Caddy、Traefik、VPS、WireGuard、SSH reverse tunnel 等由用户自行管理 | 否 |
-| `Managed FRP` | 一个全局 `frpc` 只代理 Gateway 本地端口，不再按 Workspace 建多条 MCP tunnel | 是 |
-| `Managed Cloudflare` | 由 Coding Tools 启动 Cloudflare Quick 或 Named Tunnel | 是 |
-
-例如：
+普通用户只需要填写一个 **公网 URL**，例如：
 
 ```text
-Canonical URL: https://mcp.example.com
-Public Access: External
-
-Internet → Caddy/Nginx → 127.0.0.1:28766 → Gateway → selected Workspace
+https://mcp.example.com
 ```
+
+Coding Tools 不要求用户说明这个 URL 背后究竟是路由器端口映射、Nginx/Caddy、VPS、WireGuard 还是其他隧道。只要填写了公网 URL，健康检查就会直接验证 `<公网 URL>/mcp` 和对应 OAuth metadata；未填写时则按本地模式运行。
+
+只有希望 **Coding Tools 自己管理公网隧道进程** 时，才需要进入“公网访问 · 高级”选择 `Managed FRP` 或 `Managed Cloudflare`。其中 FRP 会创建一条全局 `gateway-mcp` 路由，而不是每个 Workspace 各建一条线路。
 
 Cloudflare **Quick Tunnel** 是特殊情况：它会生成临时 `trycloudflare.com` 地址。Web Console 会把它显示为“当前有效地址”，但不会写回或覆盖 canonical 公网 URL；因此需要固定 OAuth/ChatGPT Connector 地址的正式部署应使用 Named Tunnel 或其他固定域名方式。
 

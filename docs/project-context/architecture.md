@@ -52,11 +52,15 @@ Gateway Identity
   MCP endpoint         = https://mcp.example.com/mcp
   OAuth metadata       = https://mcp.example.com/...
 
-Public Access Provider
-  local | direct | external | frp | cloudflare
+Public URL
+  empty                    → local-only
+  https://mcp.example.com  → validate this public endpoint directly
+
+Managed Exposure (advanced, optional)
+  frp | cloudflare
 ```
 
-`gateway.public_url` 是稳定的 canonical external origin。FRP/Cloudflare 只是将网络流量送到 Gateway 的 provider，不允许反向决定或覆盖这个 URL。
+`gateway.public_url` 是用户层唯一需要表达的公网意图，也是稳定的 canonical external origin。只要该 URL 非空，Gateway 健康检查就直接验证它，不再要求用户区分 direct / external / local 网络拓扑。FRP/Cloudflare 只在用户选择由 Coding Tools 托管隧道时参与生命周期管理，且不允许反向决定或覆盖 canonical URL。
 
 Cloudflare Quick Tunnel 返回的 `trycloudflare.com` 地址只记录为运行期 `effective_public_url`。它是临时 transport endpoint，不是 Gateway canonical identity。
 
@@ -251,7 +255,7 @@ invokeCommand(command, args)
 当前 Web Admin 已优先覆盖：
 
 - Gateway 配置 / 启停 / 状态；
-- Gateway canonical 公网 URL 与 Public Access（local/direct/external/FRP/Cloudflare）；
+- Gateway 公网 URL，以及可选的 Managed FRP/Cloudflare；
 - Gateway 级 managed FRP/Cloudflare 的独立启停与运行状态；
 - Workspace 列表、新增、基础策略修改、移除；
 - session → workspace 路由查看与解绑；
@@ -284,14 +288,13 @@ canonical connector identity 例如 https://mcp.example.com
                  session → selected Workspace
 
 Public Access:
-  local     → no public transport
-  direct    → bind/NAT/router managed externally
-  external  → Nginx/Caddy/VPS/WireGuard/etc.
-  frp       → one managed gateway-mcp frpc route
-  cloudflare→ one managed cloudflared process
+  public_url empty       → local-only
+  public_url configured  → validate URL directly; topology is user-managed/irrelevant
+  managed frp            → one managed gateway-mcp frpc route
+  managed cloudflare     → one managed cloudflared process
 ```
 
-- `local/direct/external` 是被动模式，不创建子进程。
+- 历史配置中的 `local/direct/external` 仍兼容读取，但对用户不再构成必须选择的网络模式；被动公网访问仅由 `public_url` 是否存在决定。
 - `frp/cloudflare` 是 managed 模式，有独立于 Gateway listener 的 start/stop 生命周期。
 - 停止 Gateway 会先停止 managed exposure，避免留下指向已关闭后端的公网进程。
 - headless `coding-tools` / `coding-tools serve` 在持久化模式为 `frp/cloudflare` 时会在 Gateway 成功启动后恢复 managed exposure；正常使用由用户手动启动进程，systemd 只是可选托管层。
