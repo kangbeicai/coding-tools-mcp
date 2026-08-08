@@ -158,8 +158,12 @@ pub async fn start_gateway_exposure_service(
             if exposure.frp_subdomain.trim().is_empty() {
                 return Err(AppError::Message("Gateway FRP 需要配置子域名。".into()));
             }
-            let inline_token = SecretStore::get_shared("gateway_frp_token")?
-                .filter(|value| !value.trim().is_empty());
+            let inline_token = if exposure.frp_profile_id.trim().is_empty() {
+                SecretStore::get_shared("gateway_frp_token")?
+                    .filter(|value| !value.trim().is_empty())
+            } else {
+                None
+            };
             let config = gateway_frp_server_config(
                 &gateway,
                 &exposure,
@@ -184,6 +188,11 @@ pub async fn start_gateway_exposure_service(
         }
         "cloudflare" => {
             let cloudflare_mode = exposure.cloudflare_mode.trim().to_ascii_lowercase();
+            if !matches!(cloudflare_mode.as_str(), "quick" | "named") {
+                return Err(AppError::Message(
+                    "Gateway Cloudflare 模式仅支持 quick 或 named。".into(),
+                ));
+            }
             if cloudflare_mode == "named" {
                 require_https_canonical(&canonical, "Cloudflare named tunnel")?;
             }
