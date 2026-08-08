@@ -53,43 +53,6 @@ pub(crate) fn gateway_frp_server_config(
             subdomain: exposure.frp_subdomain.clone(),
         },
     }
-
-    #[test]
-    fn gateway_frp_route_uses_global_gateway_contract() {
-        let gateway = GatewayConfig {
-            local_port: 29866,
-            ..GatewayConfig::default()
-        };
-        let exposure = GatewayExposureConfig {
-            frp_profile_id: "p1".into(),
-            frp_subdomain: "coding-tools".into(),
-            ..GatewayExposureConfig::default()
-        };
-        let settings = AppSettings {
-            frp_profiles: vec![FrpProfile {
-                id: "p1".into(),
-                name: "Main".into(),
-                server: "frp.example.com".into(),
-                server_port: 7001,
-            }],
-            ..AppSettings::default()
-        };
-
-        let config = gateway_frp_server_config(
-            &gateway,
-            &exposure,
-            &settings,
-            Some("ignored-manual-token".into()),
-        );
-        assert_eq!(config.server_addr, "frp.example.com");
-        assert_eq!(config.server_port, 7001);
-        assert_eq!(config.proxy.proxy_name, "gateway-mcp");
-        assert_eq!(config.proxy.local_port, 29866);
-        assert_eq!(config.proxy.subdomain, "coding-tools");
-        // The caller passes None when a saved profile is selected; the helper
-        // itself keeps an explicit override deterministic for low-level reuse.
-        assert_eq!(config.token.as_deref(), Some("ignored-manual-token"));
-    }
 }
 
 /// FRP proxy snippet for the MCP listener (`profile.tunnel` + `profile.runtime`).
@@ -393,6 +356,41 @@ mod tests {
         let toml = build_frpc_toml(&config);
         assert!(toml.contains("serverAddr = \"frp.example.com\""));
         assert!(toml.contains("auth.token = \"secret\""));
+    }
+
+    #[test]
+    fn gateway_frp_route_uses_global_gateway_contract() {
+        let gateway = GatewayConfig {
+            local_port: 29866,
+            ..GatewayConfig::default()
+        };
+        let exposure = GatewayExposureConfig {
+            frp_profile_id: "p1".into(),
+            frp_subdomain: "coding-tools".into(),
+            ..GatewayExposureConfig::default()
+        };
+        let settings = AppSettings {
+            frp_profiles: vec![FrpProfile {
+                id: "p1".into(),
+                name: "Main".into(),
+                server: "frp.example.com".into(),
+                server_port: 7001,
+            }],
+            ..AppSettings::default()
+        };
+
+        let config = gateway_frp_server_config(
+            &gateway,
+            &exposure,
+            &settings,
+            Some("explicit-token".into()),
+        );
+        assert_eq!(config.server_addr, "frp.example.com");
+        assert_eq!(config.server_port, 7001);
+        assert_eq!(config.proxy.proxy_name, "gateway-mcp");
+        assert_eq!(config.proxy.local_port, 29866);
+        assert_eq!(config.proxy.subdomain, "coding-tools");
+        assert_eq!(config.token.as_deref(), Some("explicit-token"));
     }
 
     #[test]
