@@ -52,6 +52,11 @@ pub async fn run_gateway_health_checks(state: &AppState) -> AppResult<GatewayHea
     } else {
         canonical.clone()
     };
+    let connector_base = if canonical.is_empty() {
+        effective.clone()
+    } else {
+        canonical.clone()
+    };
 
     let client = reqwest::Client::builder()
         .timeout(TIMEOUT)
@@ -288,9 +293,37 @@ pub async fn run_gateway_health_checks(state: &AppState) -> AppResult<GatewayHea
         }
     };
 
-    let public_https = effective.to_ascii_lowercase().starts_with("https://");
-    let public_mcp_url = endpoint(&effective, "/mcp");
-    let (public_ok, public_detail) = if !provider_required || effective.is_empty() {
+    let transport_differs = provider_required
+        && !effective.is_empty()
+        && !connector_base.is_empty()
+        && effective != connector_base;
+    let transport_ok = if transport_differs {
+        let transport_url = endpoint(&effective, "/mcp");
+        let (ok, detail) = probe_mcp(&client, &transport_url).await;
+        items.push(if ok {
+            ok_item(
+                "transport_mcp",
+                "provider",
+                "Managed Transport MCP",
+                format!("{transport_url} · {detail}"),
+            )
+        } else {
+            fail_item(
+                "transport_mcp",
+                "provider",
+                "Managed Transport MCP",
+                format!("{transport_url} · {detail}"),
+                "Managed provider 已启动但其实际 tunnel URL 不可达；检查 provider 日志和出站网络。",
+            )
+        });
+        ok
+    } else {
+        true
+    };
+
+    let public_https = connector_base.to_ascii_lowercase().starts_with("https://");
+    let public_mcp_url = endpoint(&connector_base, "/mcp");
+    let (public_ok, public_detail) = if !provider_required || connector_base.is_empty() {
         (false, String::new())
     } else {
         probe_mcp(&client, &public_mcp_url).await
@@ -302,7 +335,7 @@ pub async fn run_gateway_health_checks(state: &AppState) -> AppResult<GatewayHea
             "Public MCP",
             "Local-only 模式".into(),
         )
-    } else if effective.is_empty() {
+    } else if connector_base.is_empty() {
         fail_item(
             "public_mcp",
             "public",
@@ -327,18 +360,14 @@ pub async fn run_gateway_health_checks(state: &AppState) -> AppResult<GatewayHea
         )
     });
 
-    let expected_oauth_base = if !canonical.is_empty() {
-        canonical.clone()
-    } else {
-        effective.clone()
-    };
+    let expected_oauth_base = connector_base.clone();
     let oauth_metadata_ok = if auth_type == "oauth" && provider_required && !expected_oauth_base.is_empty() {
         let auth_meta = endpoint(
-            &effective,
+            &connector_base,
             "/.well-known/oauth-authorization-server",
         );
         let protected_meta = endpoint(
-            &effective,
+            &connector_base,
             "/.well-known/oauth-protected-resource",
         );
         let auth_result = check_authorization_metadata(&client, &auth_meta, &expected_oauth_base).await;
@@ -391,6 +420,7 @@ pub async fn run_gateway_health_checks(state: &AppState) -> AppResult<GatewayHea
         && local_ok
         && provider_required
         && provider_ok
+        && transport_ok
         && public_https
         && public_ok
         && oauth_metadata_ok;
@@ -405,7 +435,7 @@ pub async fn run_gateway_health_checks(state: &AppState) -> AppResult<GatewayHea
     Ok(GatewayHealthReport {
         chatgpt_ready,
         summary,
-        public_base_url: effective,
+        public_base_url: connector_base,
         items,
     })
 }

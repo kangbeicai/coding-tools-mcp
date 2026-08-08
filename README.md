@@ -82,6 +82,9 @@ cargo build --release --no-default-features --features headless --bin coding-too
 # 查看已注册工作区和 Gateway 配置
 ./target/release/coding-tools workspace list
 ./target/release/coding-tools config show
+
+# 分层检查：配置 → local listener → provider → public /mcp → OAuth metadata
+./target/release/coding-tools health
 ```
 
 也可以在启动时覆盖并保存网络设置，例如：
@@ -106,6 +109,51 @@ ssh -L 28767:127.0.0.1:28767 user@server
 ```
 
 然后在本机浏览器打开 `http://127.0.0.1:28767`。在独立管理员认证完成前，不建议也不允许直接把 Admin API 暴露到局域网/公网。
+
+#### 作为 systemd 用户服务长期运行
+
+完成 release binary 和 Web build 后，可以直接安装为当前 Linux 用户的 systemd service：
+
+```bash
+cd src-tauri
+./target/release/coding-tools install-service --web-root ../build
+
+# 等价的新命令形式
+./target/release/coding-tools service install --web-root ../build
+```
+
+安装器会把运行文件复制到稳定位置，而不是让 systemd 永久依赖 Git checkout/`target` 目录：
+
+```text
+~/.local/share/coding-tools/bin/coding-tools
+~/.local/share/coding-tools/web/
+~/.config/systemd/user/coding-tools.service
+```
+
+默认会执行 `systemctl --user enable` 并 restart 服务。unit 使用 `Restart=on-failure`，停止信号为 `SIGINT`，因此 `Gateway → managed exposure → Admin` 会按现有 shutdown 流程退出。常用维护命令：
+
+```bash
+coding-tools service status
+systemctl --user status coding-tools.service
+journalctl --user -u coding-tools.service -f
+
+# 只预览 unit，不写文件、不调用 systemctl
+coding-tools install-service --dry-run --web-root ../build
+
+# 部署 bundle/unit，但暂不 enable/start
+coding-tools install-service --no-start --web-root ../build
+
+# 卸载 service；默认同时删除安装器复制的 binary/Web bundle
+coding-tools uninstall-service
+```
+
+如果服务器需要在用户退出 SSH 后、甚至开机后仍保持 user service 运行，还需要系统允许该用户 linger：
+
+```bash
+sudo loginctl enable-linger "$USER"
+```
+
+安装器只检测并提示 linger 状态，**不会自行执行 sudo 或修改系统级登录策略**。
 
 ### 2. 打开管理界面并添加工作区
 
@@ -174,7 +222,16 @@ Cloudflare **Quick Tunnel** 是特殊情况：它会生成临时 `trycloudflare.
 
 ![MCP 健康检查结果](docs/images/health-check.png)
 
-*健康检查会逐项显示连接和认证元数据是否可用。*
+*Gateway 健康检查按配置、运行时、本地 listener、Public Access provider、managed transport、公网 canonical `/mcp` 与 OAuth metadata 分层显示结果。只有 ChatGPT 真正应使用的 HTTPS connector 地址全部通过时才返回 `ChatGPT-ready`。Cloudflare Quick 的临时 transport URL 与 canonical identity 会分别验证，避免“随机 tunnel URL 可达但固定域名不可达”的假阳性。*
+
+Headless 环境也可以把同一检查用于脚本/监控：
+
+```bash
+coding-tools health
+coding-tools health --json
+```
+
+`health` 会优先调用正在运行的 loopback Web Admin，因此能够读取真实 Gateway/FRP/Cloudflare 子进程状态；未达到 `ChatGPT-ready` 时命令返回非零退出码，适合外部监控直接判断。
 
 遇到连接问题时，无需离开桌面端即可查看最近的 MCP 请求日志：
 

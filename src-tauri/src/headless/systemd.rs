@@ -12,6 +12,36 @@ pub struct InstallOptions {
     pub start: bool,
 }
 
+#[cfg(target_os = "linux")]
+fn service_path_env() -> String {
+    let mut paths = Vec::<String>::new();
+    let mut push = |value: String| {
+        if !value.is_empty() && !paths.iter().any(|existing| existing == &value) {
+            paths.push(value);
+        }
+    };
+    if let Some(home) = dirs::home_dir() {
+        push(home.join(".local/bin").to_string_lossy().into_owned());
+        push(home.join(".cargo/bin").to_string_lossy().into_owned());
+    }
+    if let Some(current) = std::env::var_os("PATH") {
+        for path in std::env::split_paths(&current) {
+            push(path.to_string_lossy().into_owned());
+        }
+    }
+    for path in [
+        "/usr/local/sbin",
+        "/usr/local/bin",
+        "/usr/sbin",
+        "/usr/bin",
+        "/sbin",
+        "/bin",
+    ] {
+        push(path.into());
+    }
+    paths.join(":")
+}
+
 #[derive(Debug, Clone)]
 pub struct InstallResult {
     pub unit_path: PathBuf,
@@ -208,12 +238,10 @@ fn validate_web_root(path: &Path) -> AppResult<&Path> {
 #[cfg(target_os = "linux")]
 fn build_unit(binary: &Path, web_root: &Path) -> String {
     let mut environment = String::new();
-    if let Some(path) = std::env::var_os("PATH") {
-        environment.push_str(&format!(
-            "Environment={}\n",
-            systemd_assignment("PATH", &path.to_string_lossy())
-        ));
-    }
+    environment.push_str(&format!(
+        "Environment={}\n",
+        systemd_assignment("PATH", &service_path_env())
+    ));
     for key in ["XDG_CONFIG_HOME", "XDG_DATA_HOME"] {
         if let Some(value) = std::env::var_os(key) {
             environment.push_str(&format!(
@@ -389,5 +417,13 @@ mod tests {
     #[test]
     fn systemd_arg_escapes_specifiers_and_quotes() {
         assert_eq!(systemd_arg("/tmp/a%b\"c"), "\"/tmp/a%%b\\\"c\"");
+    }
+
+    #[test]
+    fn service_path_contains_common_user_and_system_bins() {
+        let path = service_path_env();
+        assert!(path.contains("/.local/bin"));
+        assert!(path.contains("/.cargo/bin"));
+        assert!(path.split(':').any(|item| item == "/usr/bin"));
     }
 }

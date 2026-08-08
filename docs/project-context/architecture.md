@@ -113,6 +113,22 @@ Web Admin     127.0.0.1:28767/       （当前强制 loopback）
 
 Linux 无图形环境不需要 Tauri、WebKit 或 GTK runtime。SvelteKit 使用 `adapter-static` 构建到 `build/`，由 Rust Admin Server 直接提供静态文件。
 
+正式服务器部署可由 headless binary 自行安装 user-level systemd service：
+
+```text
+coding-tools install-service
+        │
+        ├── ~/.local/share/coding-tools/bin/coding-tools
+        ├── ~/.local/share/coding-tools/web/
+        └── ~/.config/systemd/user/coding-tools.service
+                    │
+                    ├── Restart=on-failure
+                    ├── KillSignal=SIGINT
+                    └── coding-tools serve --web-root <stable bundle>
+```
+
+安装器不调用 sudo。若需要 user manager 在注销后继续存在，由管理员显式执行 `loginctl enable-linger <user>`。
+
 ### 2. Tauri Desktop
 
 Tauri 继续作为桌面壳存在，并复用同一套 Svelte 源码和 Rust Core。桌面专用能力，例如原生目录选择、打开系统文件管理器、WebView 内存管理，保留在 `desktop` feature 下。
@@ -228,6 +244,16 @@ invokeCommand(command, args)
 - session → workspace 路由查看与解绑；
 - 共享 MCP OAuth / Bearer 密钥；
 - 旧 per-workspace runtime 的只读状态，用于兼容导航。
+- Gateway 分层健康检查：配置 → owning runtime → local listener → public provider/transport → canonical public MCP → OAuth metadata。
+
+健康检查特别区分两个地址概念：
+
+```text
+effective transport URL      例如 Cloudflare Quick 的随机 trycloudflare.com
+canonical connector identity 例如 https://mcp.example.com
+```
+
+当两者不同时分别探测，`ChatGPT-ready` 以 ChatGPT 实际应该连接的 canonical identity 为准；只有未配置 canonical 的 Quick 临时模式才把临时 URL 当作 connector base。
 
 尚未完全迁移的桌面兼容能力包括旧 per-workspace tunnel 的全部编辑 UI、软件下载安装、Actions 全套配置以及部分桌面专用操作。推荐 Gateway 模式已经拥有独立的 Public Access 管理。
 
