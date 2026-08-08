@@ -9,7 +9,8 @@ fn main() {
 }
 
 fn generate_embedded_web() {
-    let manifest_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
+    let manifest_dir =
+        PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
     let web_root = manifest_dir
         .parent()
         .map(|path| path.join("build"))
@@ -54,10 +55,7 @@ fn collect_files(root: &Path, dir: &Path, files: &mut Vec<(String, PathBuf)>) {
             collect_files(root, &path, files);
         } else if path.is_file() {
             if let Ok(relative) = path.strip_prefix(root) {
-                files.push((
-                    relative.to_string_lossy().replace('\\', "/"),
-                    path,
-                ));
+                files.push((relative.to_string_lossy().replace('\\', "/"), path));
             }
         }
     }

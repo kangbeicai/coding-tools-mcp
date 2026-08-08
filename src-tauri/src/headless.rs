@@ -561,7 +561,9 @@ fn redact_session(value: &str) -> String {
 fn print_help() {
     println!("Coding Tools Gateway + Web Console\n");
     println!("Usage:");
-    println!("  coding-tools                         # recommended: foreground Gateway + Web Console");
+    println!(
+        "  coding-tools                         # recommended: foreground Gateway + Web Console"
+    );
     println!("  coding-tools serve [gateway/admin overrides]");
     println!("  coding-tools tui   [gateway/admin overrides]  # optional terminal monitor");
     println!("  coding-tools workspace list");
