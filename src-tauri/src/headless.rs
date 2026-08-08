@@ -307,9 +307,10 @@ fn run_server(tui: bool, args: &[String]) -> Result<(), String> {
         println!("  Web Admin  : {}", admin.local_endpoint);
         println!("  Web Console: {}", admin.web_source);
         println!();
-        println!("Remote Linux admin (recommended):");
-        println!("  ssh -L {admin_port}:127.0.0.1:{admin_port} user@server");
-        println!("  then open http://127.0.0.1:{admin_port}");
+        println!("Web Admin access:");
+        println!("  listen: {}", admin.local_endpoint);
+        println!("  from LAN: http://<server-ip>:{admin_port}");
+        println!("  note: Admin currently has no independent administrator authentication.");
         println!("Press Ctrl+C to stop.");
 
         crate::async_runtime::block_on(async {
@@ -572,7 +573,7 @@ fn print_help() {
     println!();
     println!("Overrides:");
     println!("  --bind IP --port PORT --public-url URL --auth oauth|bearer|noauth");
-    println!("  --admin-bind 127.0.0.1 --admin-port 28767 [--web-root ./build]");
+    println!("  --admin-bind 0.0.0.0 --admin-port 28767 [--web-root ./build]");
     println!("  Overrides can be passed directly, e.g. `coding-tools --port 28766`.");
     println!();
     println!("Linux headless build:");
@@ -582,8 +583,8 @@ fn print_help() {
     );
     println!("  The Web Console built above is embedded into the headless binary.");
     println!();
-    println!("Remote admin:");
-    println!("  ssh -L 28767:127.0.0.1:28767 user@server");
+    println!("LAN Web Console:");
+    println!("  http://<server-ip>:28767");
     println!();
     println!("Advanced optional service mode:");
     println!("  coding-tools service install|status|uninstall");

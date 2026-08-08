@@ -7,8 +7,8 @@ use crate::data::AppData;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AdminConfig {
-    /// Admin Web Console defaults to loopback only. Remote administration
-    /// should normally use SSH port forwarding rather than exposing this port.
+    /// Admin Web Console defaults to all IPv4 interfaces so a manually started
+    /// headless server can be opened directly from a trusted LAN.
     #[serde(default = "default_admin_bind_host")]
     pub bind_host: String,
     #[serde(default = "default_admin_port")]
@@ -66,7 +66,7 @@ impl Default for GatewayExposureConfig {
 }
 
 fn default_admin_bind_host() -> String {
-    "127.0.0.1".to_string()
+    "0.0.0.0".to_string()
 }
 
 fn default_admin_port() -> u16 {

@@ -106,16 +106,16 @@ coding-tools --bind 0.0.0.0 --port 28766 \
 
 ```text
 MCP data plane   http://127.0.0.1:28766/mcp
-Web admin plane  http://127.0.0.1:28767/
+Web admin plane  http://0.0.0.0:28767/
 ```
 
-MCP 可以按需要改为 `0.0.0.0`、端口映射或放到 HTTPS 反向代理后；**Web Admin 当前强制只监听 loopback**。远程管理 Linux 服务器推荐使用 SSH 转发：
+MCP 可以按需要改为 `0.0.0.0`、端口映射或放到 HTTPS 反向代理后。Web Admin 默认监听 `0.0.0.0:28767`，因此在可信局域网中可以直接使用服务器 IP 打开，例如：
 
 ```bash
-ssh -L 28767:127.0.0.1:28767 user@server
+http://192.168.3.19:28767
 ```
 
-然后在本机浏览器打开 `http://127.0.0.1:28767`。在独立管理员认证完成前，不建议也不允许直接把 Admin API 暴露到局域网/公网。
+Admin API 目前没有独立管理员认证，因此不要把 `28767` 直接暴露到不可信网络或公网；建议由主机防火墙限制在可信 LAN/VPN 范围。
 
 #### 可选：作为 systemd 用户服务长期运行
 
@@ -256,7 +256,7 @@ coding-tools health
 coding-tools health --json
 ```
 
-`health` 会优先调用正在运行的 loopback Web Admin，因此能够读取真实 Gateway/FRP/Cloudflare 子进程状态；未达到 `ChatGPT-ready` 时命令返回非零退出码，适合外部监控直接判断。
+`health` 会优先调用正在运行的 Web Admin，因此能够读取真实 Gateway/FRP/Cloudflare 子进程状态；未达到 `ChatGPT-ready` 时命令返回非零退出码，适合外部监控直接判断。
 
 遇到连接问题时，无需离开桌面端即可查看最近的 MCP 请求日志：
 

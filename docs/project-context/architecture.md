@@ -39,7 +39,7 @@ Browser / Tauri shell
 ```
 
 - **MCP Data Plane** 可以按部署需要监听 `127.0.0.1`、`0.0.0.0` 或指定网卡，并放在 NAT、反向代理、FRP、Cloudflare 后面。
-- **Web Admin Plane** 当前强制 loopback，仅用于本机浏览器或 SSH 端口转发；在加入独立管理员认证前不得直接暴露到局域网/公网。
+- **Web Admin Plane** 默认监听 `0.0.0.0:28767`，便于手动启动 headless 服务后从可信 LAN 直接管理；在加入独立管理员认证前不得直接暴露到不可信网络/公网。
 - ChatGPT 只配置一次根 `/mcp`，不为每个 Workspace 创建独立插件。
 
 ### Gateway Identity 与 Public Access 分离
@@ -67,7 +67,7 @@ coding-tools-mcp/
 ├── src-tauri/
 │   ├── src/
 │   │   ├── gateway/          # 单入口多 Workspace MCP Gateway
-│   │   ├── admin/            # loopback Web Admin server + JSON RPC
+│   │   ├── admin/            # LAN-capable Web Admin server + JSON RPC
 │   │   ├── tools/            # 文件/Patch/Exec/Git/History 工具内核
 │   │   ├── workspace/        # Workspace 配置与资源校验
 │   │   ├── runtime/          # 旧 per-workspace runtime 兼容层
@@ -108,7 +108,7 @@ coding-tools serve
 
 ```text
 MCP Gateway   127.0.0.1:28766/mcp   （可改监听地址）
-Web Admin     127.0.0.1:28767/       （当前强制 loopback）
+Web Admin     0.0.0.0:28767/         （默认 LAN 可访问）
 ```
 
 Linux 无图形环境不需要 Tauri、WebKit 或 GTK runtime。产品的首选运行模式是 CLI-first/manual-run：用户像启动 OpenCode/Pi 一样手动运行 `coding-tools`，进程在前台托管 Web Admin、Global Gateway 和可选 managed exposure，`Ctrl+C` 后完整退出。
@@ -118,7 +118,7 @@ SvelteKit 仍使用 `adapter-static` 构建到 `build/`，但 headless release �
 ```text
 coding-tools
     │
-    ├── Web Admin      127.0.0.1:28767
+    ├── Web Admin      0.0.0.0:28767
     ├── Global Gateway 127.0.0.1:28766/mcp
     └── Managed Exposure（可选 FRP/Cloudflare）
 
@@ -302,7 +302,7 @@ Public Access:
 ## 安全边界
 
 1. MCP Gateway 和 Web Admin 使用不同端口和不同暴露策略。
-2. Admin Server 当前只接受 loopback bind；远程 Linux 管理使用 SSH port forwarding。
+2. Admin Server 默认监听 `0.0.0.0:28767` 以支持可信 LAN 直接管理；由于尚无独立管理员认证，部署侧必须用防火墙/VPN 限制管理端口的可达范围。
 3. 多 Workspace 下必须显式 session 选择，避免工具调用落入错误项目。
 4. Workspace 文件/Patch 工具继续使用现有路径边界与 symlink 检查。
 5. `exec_command` 的进程级隔离仍属于后续安全债：当前主要是 policy/parser boundary，并非完整 OS filesystem sandbox。

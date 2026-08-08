@@ -32,7 +32,7 @@ pub fn spawn_admin_listener(
     config: AdminConfig,
     web_root: PathBuf,
 ) -> Result<AdminProcess, String> {
-    let bind_ip = parse_loopback(&config.bind_host)?;
+    let bind_ip = parse_bind_host(&config.bind_host)?;
     let listener = std::net::TcpListener::bind((bind_ip, config.local_port)).map_err(|error| {
         format!(
             "Admin 地址 {}:{} 绑定失败: {error}",
@@ -52,7 +52,10 @@ pub fn spawn_admin_listener(
         "unavailable".into()
     };
     let state = AdminState { app, web_root };
-    let endpoint = format!("http://127.0.0.1:{}", config.local_port);
+    let endpoint = match bind_ip {
+        std::net::IpAddr::V4(ip) => format!("http://{ip}:{}", config.local_port),
+        std::net::IpAddr::V6(ip) => format!("http://[{ip}]:{}", config.local_port),
+    };
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
     let handle = crate::async_runtime::spawn(async move {
         let listener = match tokio::net::TcpListener::from_std(listener) {
@@ -186,21 +189,14 @@ fn content_type(path: &std::path::Path) -> &'static str {
     }
 }
 
-fn parse_loopback(value: &str) -> Result<std::net::IpAddr, String> {
+fn parse_bind_host(value: &str) -> Result<std::net::IpAddr, String> {
     let value = value.trim();
     if value.eq_ignore_ascii_case("localhost") {
         return Ok(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST));
     }
-    let ip = value
+    value
         .parse::<std::net::IpAddr>()
-        .map_err(|_| format!("Admin 监听地址无效: {value}"))?;
-    if !ip.is_loopback() {
-        return Err(
-            "Admin Web 当前仅允许监听 loopback 地址。远程 Linux 管理请使用 SSH 端口转发；在加入独立管理员认证前不允许直接暴露管理 API。"
-                .into(),
-        );
-    }
-    Ok(ip)
+        .map_err(|_| format!("Admin 监听地址无效: {value}"))
 }
 
 #[cfg(test)]
@@ -208,10 +204,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn admin_listener_rejects_non_loopback_bindings() {
-        assert!(parse_loopback("0.0.0.0").is_err());
-        assert!(parse_loopback("127.0.0.1").is_ok());
-        assert!(parse_loopback("localhost").is_ok());
+    fn admin_listener_accepts_lan_and_wildcard_bindings() {
+        assert!(parse_bind_host("0.0.0.0").is_ok());
+        assert!(parse_bind_host("192.168.3.19").is_ok());
+        assert!(parse_bind_host("127.0.0.1").is_ok());
+        assert!(parse_bind_host("localhost").is_ok());
+        assert!(parse_bind_host("not-an-ip").is_err());
     }
 
     #[test]
