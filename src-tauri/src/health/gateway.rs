@@ -194,6 +194,24 @@ pub async fn run_gateway_health_checks(state: &AppState) -> AppResult<GatewayHea
         }
     };
 
+    let runtime_ok = gateway_status.state == "running";
+    items.push(if runtime_ok {
+        ok_item(
+            "gateway_runtime",
+            "local",
+            "Gateway Runtime",
+            "Gateway process is running in the owning service".into(),
+        )
+    } else {
+        fail_item(
+            "gateway_runtime",
+            "local",
+            "Gateway Runtime",
+            format!("state={}", gateway_status.state),
+            "通过 Web Admin/systemd 启动 Gateway；如果这里只是 CLI 离线检查，优先确认 Admin 是否正在运行。",
+        )
+    });
+
     let (local_ok, local_detail) = probe_mcp(&client, &gateway_status.local_endpoint).await;
     items.push(if local_ok {
         ok_item(
@@ -369,6 +387,7 @@ pub async fn run_gateway_health_checks(state: &AppState) -> AppResult<GatewayHea
 
     let chatgpt_ready = workspace_count > 0
         && auth_ok
+        && runtime_ok
         && local_ok
         && provider_required
         && provider_ok
