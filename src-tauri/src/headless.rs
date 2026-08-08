@@ -9,7 +9,10 @@ use std::sync::Arc;
 
 use crate::admin::{spawn_admin_listener, AdminProcess};
 use crate::app_state::AppState;
-use crate::gateway::{gateway_status, start_gateway_service, stop_gateway_service};
+use crate::gateway::{
+    gateway_exposure_status, gateway_status, start_gateway_exposure_service, start_gateway_service,
+    stop_gateway_service,
+};
 use crate::settings::{AdminConfig, GatewayConfig};
 
 pub fn run_from_env() -> Result<(), String> {
@@ -45,6 +48,18 @@ fn run_server(tui: bool, args: &[String]) -> Result<(), String> {
     let admin_port = admin_config.local_port;
     let admin = spawn_admin_listener(app.clone(), admin_config, web_root)?;
     let gateway_start = crate::async_runtime::block_on(start_gateway_service(&app));
+    let exposure_mode = app
+        .with_settings(|store| Ok(store.settings().gateway_exposure.mode))
+        .map_err(|error| error.to_string())?;
+    let managed_exposure = matches!(
+        exposure_mode.trim().to_ascii_lowercase().as_str(),
+        "frp" | "cloudflare"
+    );
+    let exposure_start = if gateway_start.is_ok() && managed_exposure {
+        Some(crate::async_runtime::block_on(start_gateway_exposure_service(&app)))
+    } else {
+        None
+    };
 
     if tui {
         run_terminal_ui(app, admin)
@@ -61,6 +76,23 @@ fn run_server(tui: bool, args: &[String]) -> Result<(), String> {
             Err(error) => {
                 println!("  MCP Gateway: not started ({error})");
                 println!("               Open Web Admin, add/fix a workspace, then start Gateway there.");
+            }
+        }
+        if let Some(result) = exposure_start {
+            match result {
+                Ok(exposure) => {
+                    println!("  Exposure   : {} ({})", exposure.state, exposure.mode);
+                    if !exposure.effective_public_url.is_empty() {
+                        println!(
+                            "  Effective  : {}/mcp",
+                            exposure.effective_public_url.trim_end_matches('/')
+                        );
+                    }
+                }
+                Err(error) => {
+                    println!("  Exposure   : failed ({error})");
+                    println!("               Gateway remains available locally; fix Public Access in Web Admin.");
+                }
             }
         }
         println!("  Web Admin  : {}", admin.local_endpoint);
@@ -83,6 +115,7 @@ fn run_terminal_ui(app: Arc<AppState>, admin: AdminProcess) -> Result<(), String
     let stdin = io::stdin();
     loop {
         let status = gateway_status(&app).map_err(|error| error.to_string())?;
+        let exposure = gateway_exposure_status(&app).map_err(|error| error.to_string())?;
         clear_terminal()?;
         println!("┌──────────────────────────────────────────────────────────┐");
         println!("│ Coding Tools Gateway · lightweight terminal monitor      │");
@@ -92,6 +125,7 @@ fn run_terminal_ui(app: Arc<AppState>, admin: AdminProcess) -> Result<(), String
         println!("│ Web Admin  {:<46} │", truncate(&admin.local_endpoint, 46));
         println!("│ Workspaces {:<46} │", status.workspace_count);
         println!("│ Sessions   {:<46} │", status.session_count);
+        println!("│ Exposure   {:<46} │", truncate(&format!("{} / {}", exposure.mode, exposure.state), 46));
         println!("└──────────────────────────────────────────────────────────┘");
         println!();
         println!("Web Console is the primary UI. This terminal view is intentionally minimal.");
@@ -162,6 +196,10 @@ fn config_command(args: &[String]) -> Result<(), String> {
             println!("gateway.localPort={}", settings.gateway.local_port);
             println!("gateway.publicUrl={}", settings.gateway.public_url);
             println!("gateway.authType={}", settings.gateway.auth_type);
+            println!("gateway.exposure.mode={}", settings.gateway_exposure.mode);
+            println!("gateway.exposure.frpProfileId={}", settings.gateway_exposure.frp_profile_id);
+            println!("gateway.exposure.frpSubdomain={}", settings.gateway_exposure.frp_subdomain);
+            println!("gateway.exposure.cloudflareMode={}", settings.gateway_exposure.cloudflare_mode);
             println!("admin.bindHost={}", settings.admin.bind_host);
             println!("admin.localPort={}", settings.admin.local_port);
             Ok(())

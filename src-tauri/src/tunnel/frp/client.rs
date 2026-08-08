@@ -15,7 +15,8 @@ use crate::tunnel::TunnelServiceKind;
 use crate::workspace::WorkspaceProfile;
 
 use super::{
-    build_frpc_toml_for_routes, frp_server_config, FrpServerConfig, VERSION as FRP_VERSION,
+    build_frpc_toml, build_frpc_toml_for_routes, frp_server_config, FrpServerConfig,
+    VERSION as FRP_VERSION,
 };
 
 const READY_TIMEOUT: Duration = Duration::from_secs(8);
@@ -371,6 +372,88 @@ pub async fn spawn_frpc(
         clear_managed_frpc_pid(workspace_id);
         return Err(AppError::Message(
             "frpc 已启动但很快退出。请检查 FRP 服务器地址、端口、Token 与子域名配置。".into(),
+        ));
+    }
+
+    Ok(FrpcHandle { child, pid })
+}
+
+pub(crate) async fn spawn_frpc_config(
+    instance_id: &str,
+    cwd: &Path,
+    config: &FrpServerConfig,
+    settings: &crate::settings::AppSettings,
+    use_proxy: bool,
+    log_path: &Path,
+) -> AppResult<FrpcHandle> {
+    validate_frp_config(config)?;
+    let frpc = ensure_frpc().await?;
+    let config_path = managed_frpc_config_path(instance_id)?;
+    if let Some(parent) = log_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&config_path, build_frpc_toml(config))?;
+    let log_offset = log_file_len(log_path);
+
+    let mut cmd = Command::new(&frpc);
+    cmd.args(["-c", config_path.to_string_lossy().as_ref()]);
+    cmd.stdout(std::process::Stdio::piped());
+    cmd.stderr(std::process::Stdio::piped());
+    cmd.current_dir(cwd);
+
+    #[cfg(windows)]
+    {
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW);
+    }
+
+    #[cfg(unix)]
+    {
+        cmd.process_group(0);
+    }
+
+    if use_proxy {
+        crate::tunnel::cloudflare::apply_proxy_env(&mut cmd, &settings.proxy);
+    }
+
+    let mut child = cmd
+        .spawn()
+        .map_err(|err| AppError::Message(format!("启动 frpc 失败: {err}")))?;
+    let pid = child.id();
+    if let Some(pid) = pid {
+        if let Err(error) = write_managed_frpc_pid(instance_id, pid, &frpc) {
+            let _ = stop_child(child, Some(pid)).await;
+            return Err(error);
+        }
+    }
+
+    if let Some(stdout) = child.stdout.take() {
+        let log_path = log_path.to_path_buf();
+        tokio::spawn(async move {
+            stream_frpc_logs(stdout, vec![log_path]).await;
+        });
+    }
+    if let Some(stderr) = child.stderr.take() {
+        let log_path = log_path.to_path_buf();
+        tokio::spawn(async move {
+            stream_frpc_logs(stderr, vec![log_path]).await;
+        });
+    }
+
+    let ready = match wait_for_frpc_ready(&mut child, log_path, log_offset, 1).await {
+        Ok(ready) => ready,
+        Err(error) => {
+            let _ = stop_child(child, pid).await;
+            clear_managed_frpc_pid(instance_id);
+            return Err(error);
+        }
+    };
+    if !ready {
+        let _ = stop_child(child, pid).await;
+        clear_managed_frpc_pid(instance_id);
+        return Err(AppError::Message(
+            "frpc 已启动但很快退出。请检查 Gateway FRP 服务器、Token 与子域名配置。".into(),
         ));
     }
 

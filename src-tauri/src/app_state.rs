@@ -2,13 +2,14 @@ use std::sync::Mutex;
 
 use crate::data::DataStore;
 use crate::error::AppResult;
-use crate::gateway::GatewayProcess;
+use crate::gateway::{GatewayExposureProcess, GatewayProcess};
 use crate::runtime::RuntimeSupervisor;
 
 pub struct AppState {
     pub data: Mutex<DataStore>,
     pub runtime: Mutex<RuntimeSupervisor>,
     pub gateway: Mutex<Option<GatewayProcess>>,
+    pub gateway_exposure: Mutex<Option<GatewayExposureProcess>>,
 }
 
 impl AppState {
@@ -19,6 +20,7 @@ impl AppState {
             data: Mutex::new(store),
             runtime: Mutex::new(RuntimeSupervisor::default()),
             gateway: Mutex::new(None),
+            gateway_exposure: Mutex::new(None),
         })
     }
 
@@ -52,6 +54,17 @@ impl AppState {
     ) -> AppResult<R> {
         let mut guard = self
             .gateway
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        f(&mut guard)
+    }
+
+    pub fn with_gateway_exposure<R>(
+        &self,
+        f: impl FnOnce(&mut Option<GatewayExposureProcess>) -> AppResult<R>,
+    ) -> AppResult<R> {
+        let mut guard = self
+            .gateway_exposure
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         f(&mut guard)

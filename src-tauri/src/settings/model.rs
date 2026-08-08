@@ -15,6 +15,56 @@ pub struct AdminConfig {
     pub local_port: u16,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GatewayExposureConfig {
+    /// `local`, `direct`, `external`, `frp`, or `cloudflare`.
+    #[serde(default = "default_gateway_exposure_mode")]
+    pub mode: String,
+    /// Reuse a globally configured FRP server profile when non-empty.
+    #[serde(default)]
+    pub frp_profile_id: String,
+    /// Inline FRP server fallback used when no profile is selected.
+    #[serde(default)]
+    pub frp_server: String,
+    #[serde(default = "default_frp_server_port")]
+    pub frp_server_port: u16,
+    #[serde(default)]
+    pub frp_subdomain: String,
+    /// `quick` or `named`.
+    #[serde(default = "default_cloudflare_mode")]
+    pub cloudflare_mode: String,
+    /// Reuse the global outbound proxy when starting managed exposure clients.
+    #[serde(default = "default_use_proxy")]
+    pub use_proxy: bool,
+}
+
+fn default_gateway_exposure_mode() -> String {
+    "local".to_string()
+}
+
+fn default_cloudflare_mode() -> String {
+    "quick".to_string()
+}
+
+fn default_use_proxy() -> bool {
+    true
+}
+
+impl Default for GatewayExposureConfig {
+    fn default() -> Self {
+        Self {
+            mode: default_gateway_exposure_mode(),
+            frp_profile_id: String::new(),
+            frp_server: String::new(),
+            frp_server_port: default_frp_server_port(),
+            frp_subdomain: String::new(),
+            cloudflare_mode: default_cloudflare_mode(),
+            use_proxy: default_use_proxy(),
+        }
+    }
+}
+
 fn default_admin_bind_host() -> String {
     "127.0.0.1".to_string()
 }
@@ -166,6 +216,11 @@ pub struct AppSettings {
     /// per-workspace MCP listener settings.
     #[serde(default)]
     pub gateway: GatewayConfig,
+    /// How the Gateway's canonical public URL is exposed. This deliberately
+    /// stays separate from `gateway.public_url`: the URL is identity, while
+    /// this configuration only describes transport/routing.
+    #[serde(default)]
+    pub gateway_exposure: GatewayExposureConfig,
     /// Local Web management plane. Kept separate from the public MCP data
     /// plane so the admin API does not need to be exposed to ChatGPT.
     #[serde(default)]
@@ -202,6 +257,7 @@ impl AppSettings {
             download: data.download.clone(),
             proxy: data.proxy.clone(),
             gateway: data.gateway.clone(),
+            gateway_exposure: data.gateway_exposure.clone(),
             admin: data.admin.clone(),
             shared_secrets: data.shared_secrets.clone(),
             workspace_secrets: data.workspace_secrets.clone(),
@@ -215,6 +271,7 @@ impl AppSettings {
         data.download = self.download.clone();
         data.proxy = self.proxy.clone();
         data.gateway = self.gateway.clone();
+        data.gateway_exposure = self.gateway_exposure.clone();
         data.admin = self.admin.clone();
         data.shared_secrets = self.shared_secrets.clone();
         data.workspace_secrets = self.workspace_secrets.clone();

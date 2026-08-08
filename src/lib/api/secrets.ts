@@ -59,7 +59,9 @@ export type SharedSecretKey =
   | "actions_api_key"
   | "actions_oauth_client_secret"
   | "actions_oauth_password"
-  | "actions_oauth_token_secret";
+  | "actions_oauth_token_secret"
+  | "gateway_frp_token"
+  | "gateway_cloudflare_token";
 
 export async function getSharedSecret(key: SharedSecretKey): Promise<string | null> {
   return invokeCommand<string | null>("get_shared_secret", { key });

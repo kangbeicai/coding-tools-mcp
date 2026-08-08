@@ -11,7 +11,7 @@ use super::TunnelServiceKind;
 pub(crate) use client::{
     acquire_frpc_operation_lock, clear_managed_frpc_pid, frpc_log_name, frpc_reconnect_loop_detected,
     managed_frpc_config_matches, probe_local_mcp_ok, probe_public_mcp_endpoint,
-    read_frpc_log_tail, stop_recorded_frpc_instance, PublicMcpProbe,
+    read_frpc_log_tail, spawn_frpc_config, stop_recorded_frpc_instance, FrpcHandle, PublicMcpProbe,
 };
 pub(crate) use client::{cached_frpc_path, download_frpc_to_cache};
 pub use client::{resolve_frpc, spawn_frpc};
@@ -22,6 +22,37 @@ pub(crate) const VERSION: &str = FRP_VERSION;
 #[allow(dead_code)]
 pub(crate) fn frp_version() -> &'static str {
     FRP_VERSION
+}
+
+pub(crate) fn gateway_frp_server_config(
+    gateway: &crate::settings::GatewayConfig,
+    exposure: &crate::settings::GatewayExposureConfig,
+    settings: &AppSettings,
+    token_override: Option<String>,
+) -> FrpServerConfig {
+    let (server_addr, server_port) = settings
+        .find_frp_profile(&exposure.frp_profile_id)
+        .map(|profile| (profile.server.clone(), profile.server_port))
+        .unwrap_or_else(|| (exposure.frp_server.clone(), exposure.frp_server_port));
+    let token = token_override.or_else(|| {
+        if exposure.frp_profile_id.trim().is_empty() {
+            None
+        } else {
+            crate::secret::SecretStore::get_app("frp_profile_token", &exposure.frp_profile_id)
+                .ok()
+                .flatten()
+        }
+    });
+    FrpServerConfig {
+        server_addr,
+        server_port,
+        token,
+        proxy: FrpProxyConfig {
+            proxy_name: "gateway-mcp".into(),
+            local_port: gateway.local_port,
+            subdomain: exposure.frp_subdomain.clone(),
+        },
+    }
 }
 
 /// FRP proxy snippet for the MCP listener (`profile.tunnel` + `profile.runtime`).

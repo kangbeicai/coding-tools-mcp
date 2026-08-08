@@ -15,6 +15,7 @@ use crate::auth::{
     AuthorizeForm, AuthorizeParams, OAuthRuntime, TokenForm,
 };
 use crate::gateway::server::handle_request;
+use crate::gateway::normalize_public_origin;
 use crate::gateway::state::{GatewayState, SharedGatewayState};
 use crate::secret::SecretStore;
 use crate::settings::GatewayConfig;
@@ -94,7 +95,8 @@ pub fn spawn_listener(
 
     let bind_host = config.bind_host.trim().to_string();
     let port = config.local_port;
-    let configured_public_url = normalize_public_url(&config.public_url);
+    let configured_public_url = normalize_public_origin(&config.public_url)
+        .map_err(|error| error.to_string())?;
     let oauth = if auth.oauth_enabled() {
         let base = external_base_url(&HeaderMap::new(), port, &configured_public_url);
         Some(Arc::new(OAuthRuntime::new(
@@ -297,11 +299,6 @@ fn bind_listener(bind_host: &str, port: u16) -> Result<std::net::TcpListener, St
     Ok(listener)
 }
 
-fn normalize_public_url(value: &str) -> String {
-    let value = value.trim().trim_end_matches('/');
-    value.strip_suffix("/mcp").unwrap_or(value).to_string()
-}
-
 fn local_endpoint(bind_host: &str, port: u16) -> String {
     let display_host = match bind_host.parse::<std::net::IpAddr>() {
         Ok(std::net::IpAddr::V4(ip)) if ip.is_unspecified() => "127.0.0.1".to_string(),
@@ -403,8 +400,14 @@ mod tests {
 
     #[test]
     fn public_url_accepts_base_or_mcp_endpoint() {
-        assert_eq!(normalize_public_url("https://example.com/mcp"), "https://example.com");
-        assert_eq!(normalize_public_url("https://example.com/"), "https://example.com");
+        assert_eq!(
+            normalize_public_origin("https://example.com/mcp").unwrap(),
+            "https://example.com"
+        );
+        assert_eq!(
+            normalize_public_origin("https://example.com/").unwrap(),
+            "https://example.com"
+        );
     }
 
     #[test]

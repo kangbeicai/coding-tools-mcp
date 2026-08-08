@@ -2,7 +2,9 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::settings::{AdminConfig, DownloadConfig, FrpProfile, GatewayConfig, ProxyConfig};
+use crate::settings::{
+    AdminConfig, DownloadConfig, FrpProfile, GatewayConfig, GatewayExposureConfig, ProxyConfig,
+};
 use crate::workspace::WorkspaceProfile;
 
 /// Unified on-disk payload stored in `data/profiles.json`.
@@ -18,6 +20,8 @@ pub struct AppData {
     pub proxy: ProxyConfig,
     #[serde(default)]
     pub gateway: GatewayConfig,
+    #[serde(default)]
+    pub gateway_exposure: GatewayExposureConfig,
     #[serde(default)]
     pub admin: AdminConfig,
     #[serde(default)]

@@ -4,8 +4,10 @@ use serde_json::{json, Value};
 use crate::app_state::{bootstrap_workspace, teardown_workspace, AppState};
 use crate::error::{AppError, AppResult};
 use crate::gateway::{
-    gateway_status, get_gateway_config, restart_gateway_service, set_gateway_config,
-    start_gateway_service, stop_gateway_service,
+    gateway_exposure_status, gateway_status, get_gateway_config, get_gateway_exposure_config,
+    restart_gateway_service, set_gateway_config, set_gateway_exposure_config,
+    start_gateway_exposure_service, start_gateway_service, stop_gateway_exposure_service,
+    stop_gateway_service,
 };
 use crate::workspace::resources::{assign_free_workspace_ports, validate_workspace_resources_update};
 use crate::workspace::WorkspaceProfile;
@@ -21,6 +23,8 @@ const SHARED_KEYS: &[&str] = &[
     "actions_oauth_client_secret",
     "actions_oauth_password",
     "actions_oauth_token_secret",
+    "gateway_frp_token",
+    "gateway_cloudflare_token",
 ];
 
 const GATEWAY_SHARED_KEYS: &[&str] = &[
@@ -141,6 +145,21 @@ async fn dispatch_inner(state: &AppState, request: RpcRequest) -> AppResult<Valu
             set_gateway_config(state, gateway)?;
             Ok(Value::Null)
         }
+        "get_gateway_exposure" => serde_value(get_gateway_exposure_config(state)?),
+        "set_gateway_exposure" => {
+            let exposure = serde_json::from_value(
+                request
+                    .args
+                    .get("exposure")
+                    .cloned()
+                    .ok_or_else(|| AppError::Message("缺少 exposure".into()))?,
+            )?;
+            set_gateway_exposure_config(state, exposure)?;
+            Ok(Value::Null)
+        }
+        "get_gateway_exposure_status" => serde_value(gateway_exposure_status(state)?),
+        "start_gateway_exposure" => serde_value(start_gateway_exposure_service(state).await?),
+        "stop_gateway_exposure" => serde_value(stop_gateway_exposure_service(state).await?),
         "get_gateway_status" => serde_value(gateway_status(state)?),
         "clear_gateway_session" => {
             let session_key = arg_str(&request.args, "sessionKey")?;
@@ -159,6 +178,25 @@ async fn dispatch_inner(state: &AppState, request: RpcRequest) -> AppResult<Valu
         "stop_gateway" => serde_value(stop_gateway_service(state).await?),
         "restart_gateway" => serde_value(restart_gateway_service(state).await?),
         "get_admin_config" => state.with_settings(|store| serde_value(store.settings().admin)),
+        "list_frp_profiles" => state.with_settings(|store| {
+            let profiles: Vec<Value> = store
+                .data()
+                .frp_profiles
+                .iter()
+                .map(|profile| {
+                    json!({
+                        "id": profile.id,
+                        "name": profile.name,
+                        "server": profile.server,
+                        "serverPort": profile.server_port,
+                        "hasToken": store
+                            .get_app_secret("frp_profile_token", &profile.id)
+                            .is_some_and(|value| !value.trim().is_empty())
+                    })
+                })
+                .collect();
+            Ok(Value::Array(profiles))
+        }),
         "get_shared_secret" => {
             let key = shared_key(&request.args)?;
             state.with_data(|store| serde_value(store.get_shared_secret(key)))

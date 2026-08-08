@@ -4,6 +4,9 @@ use crate::app_state::AppState;
 use crate::error::{AppError, AppResult};
 use crate::settings::GatewayConfig;
 
+use super::exposure::{
+    normalize_public_origin, start_gateway_exposure_service, stop_gateway_exposure_service,
+};
 use super::listener::spawn_listener;
 use super::state::GatewaySessionInfo;
 
@@ -22,13 +25,14 @@ pub fn get_gateway_config(state: &AppState) -> AppResult<GatewayConfig> {
     state.with_settings(|store| Ok(store.settings().gateway))
 }
 
-pub fn set_gateway_config(state: &AppState, gateway: GatewayConfig) -> AppResult<()> {
+pub fn set_gateway_config(state: &AppState, mut gateway: GatewayConfig) -> AppResult<()> {
     let running = state.with_gateway(|process| Ok(process.is_some()))?;
     if running {
         return Err(AppError::Message(
             "请先停止全局 Gateway，再修改监听地址、端口或认证配置。".into(),
         ));
     }
+    gateway.public_url = normalize_public_origin(&gateway.public_url)?;
     state.with_settings(|store| {
         let mut settings = store.settings();
         settings.gateway = gateway;
@@ -53,6 +57,7 @@ pub async fn start_gateway_service(state: &AppState) -> AppResult<GatewayStatusD
 }
 
 pub async fn stop_gateway_service(state: &AppState) -> AppResult<GatewayStatusDto> {
+    let _ = stop_gateway_exposure_service(state).await?;
     let process = state.with_gateway(|slot| Ok(slot.take()))?;
     if let Some(process) = process {
         let _ = process.shutdown.send(());
@@ -62,8 +67,14 @@ pub async fn stop_gateway_service(state: &AppState) -> AppResult<GatewayStatusDt
 }
 
 pub async fn restart_gateway_service(state: &AppState) -> AppResult<GatewayStatusDto> {
+    let exposure_was_running =
+        state.with_gateway_exposure(|process| Ok(process.is_some()))?;
     let _ = stop_gateway_service(state).await?;
-    start_gateway_service(state).await
+    let status = start_gateway_service(state).await?;
+    if exposure_was_running {
+        let _ = start_gateway_exposure_service(state).await?;
+    }
+    Ok(status)
 }
 
 pub fn gateway_status(state: &AppState) -> AppResult<GatewayStatusDto> {
@@ -107,7 +118,7 @@ fn local_endpoint(config: &GatewayConfig) -> String {
 }
 
 fn public_endpoint(config: &GatewayConfig) -> String {
-    let base = config.public_url.trim().trim_end_matches('/');
+    let base = normalize_public_origin(&config.public_url).unwrap_or_default();
     if base.is_empty() {
         String::new()
     } else if base.ends_with("/mcp") {

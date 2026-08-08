@@ -90,6 +90,8 @@ const SHARED_KEYS: &[&str] = &[
     "actions_oauth_client_secret",
     "actions_oauth_password",
     "actions_oauth_token_secret",
+    "gateway_frp_token",
+    "gateway_cloudflare_token",
 ];
 
 const MCP_SHARED_KEYS: &[&str] = &[
