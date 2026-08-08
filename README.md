@@ -122,6 +122,8 @@ ssh -L 28767:127.0.0.1:28767 user@server
 
 - 默认监听 `127.0.0.1:28766`，只允许本机访问；
 - 需要局域网访问或路由器端口映射时，把监听地址改为 `0.0.0.0` 或指定网卡 IP；
+- `Canonical 公网 URL` 是 Gateway 对外的固定身份，例如 `https://mcp.example.com`；最终 MCP 地址是 `https://mcp.example.com/mcp`；
+- 使用 OAuth 时，Authorization/Token/Protected Resource metadata 均以这个 canonical URL 为基准；FRP/Cloudflare 配置不会反向覆盖它；
 - Gateway 使用共享 OAuth/Bearer 凭据，一个 ChatGPT 插件即可访问所有已注册工作区；
 - 当注册了两个及以上工作区时，项目工具在执行前必须先通过 `select_workspace` 绑定当前会话；
 - `/w/<workspace-id>/mcp` 是显式路径路由，主要用于调试或其他 MCP 客户端，并不要求在 ChatGPT 中分别创建插件。
@@ -130,15 +132,30 @@ ssh -L 28767:127.0.0.1:28767 user@server
 
 ### 4. 暴露一个公网入口
 
-如果 AI 客户端不在本机，需要把本地 MCP 暴露为 HTTPS 地址：
+公网 URL 和“如何把流量送到 Gateway”是两个独立概念。先为 Gateway 配置 canonical 公网 URL，再在 **Public Access** 中选择实际暴露方式：
 
-- 路由器/NAT 端口映射：Gateway 必须监听 `0.0.0.0` 或对应局域网 IP；
-- Nginx/Caddy/Traefik：把一个 HTTPS 域名反向代理到 Gateway 本地端口；
-- FRP / Cloudflare：旧工作区模式仍可由桌面端自动管理；全局 Gateway 的内置单隧道管理正在从旧的 per-workspace tunnel supervisor 迁移，当前也可以让外部 `frpc` / `cloudflared` 直接代理 Gateway 端口。
+| 模式 | 含义 | Coding Tools 是否启动子进程 |
+| --- | --- | --- |
+| `Local only` | 只在服务器本地使用，不声明公网访问 | 否 |
+| `Direct` | Gateway 直接监听 LAN/WAN，或由路由器/NAT 做端口映射 | 否 |
+| `External` | Nginx、Caddy、Traefik、VPS、WireGuard、SSH reverse tunnel 等由用户自行管理 | 否 |
+| `Managed FRP` | 一个全局 `frpc` 只代理 Gateway 本地端口，不再按 Workspace 建多条 MCP tunnel | 是 |
+| `Managed Cloudflare` | 由 Coding Tools 启动 Cloudflare Quick 或 Named Tunnel | 是 |
+
+例如：
+
+```text
+Canonical URL: https://mcp.example.com
+Public Access: External
+
+Internet → Caddy/Nginx → 127.0.0.1:28766 → Gateway → selected Workspace
+```
+
+Cloudflare **Quick Tunnel** 是特殊情况：它会生成临时 `trycloudflare.com` 地址。Web Console 会把它显示为“当前有效地址”，但不会写回或覆盖 canonical 公网 URL；因此需要固定 OAuth/ChatGPT Connector 地址的正式部署应使用 Named Tunnel 或其他固定域名方式。
 
 ![FRP 配置页面](docs/images/frp-configuration.png)
 
-*FRP 服务器配置集中保存，各工作区只需选择配置并填写自己的子域名。*
+*全局 FRP Server 配置仍可复用；推荐模式下 Gateway 只创建一条 `gateway-mcp` FRP 路由，Workspace 不再各自暴露 MCP。*
 
 如果还没有可用的 FRPS 服务端，可以参考：[FRPS 服务端安装教程（微信公众号）](https://mp.weixin.qq.com/s/kmpQhHsvmHlaLfj4rw3A0Q)。安装完成后，把服务端地址、端口和 Token 填入客户端的“FRP 配置”即可。
 
@@ -165,7 +182,7 @@ ssh -L 28767:127.0.0.1:28767 user@server
 
 *日志可快速确认工具列表、历史初始化和检查点调用是否真正到达服务端。*
 
-支持 MCP 的客户端使用同一个 Gateway 公网 URL。使用 OAuth 时，Gateway 使用共享 OAuth 凭据，不再要求每个工作区单独授权。
+支持 MCP 的客户端使用同一个 Gateway canonical 公网 URL。使用 OAuth 时，Gateway 使用共享 OAuth 凭据，不再要求每个工作区单独授权；OAuth metadata 也始终从 canonical URL 生成，而不是从 FRP/Cloudflare provider 配置推导。
 
 新对话的推荐初始化顺序：
 

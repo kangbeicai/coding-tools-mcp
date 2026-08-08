@@ -7,7 +7,7 @@ use crate::secret::SecretStore;
 use crate::settings::{GatewayConfig, GatewayExposureConfig};
 use crate::tunnel::{
     clear_managed_frpc_pid, gateway_frp_server_config, log_dir_for_profile,
-    spawn_cloudflare_tunnel, spawn_frpc_config, stop_child,
+    spawn_cloudflare_tunnel, spawn_frpc_config, stop_child, stop_recorded_frpc_instance,
 };
 
 const GATEWAY_EXPOSURE_ID: &str = "gateway-exposure";
@@ -170,6 +170,10 @@ pub async fn start_gateway_exposure_service(
                 &settings,
                 inline_token,
             );
+            // A hard-killed server can leave its managed frpc child alive.
+            // Reclaim only the PID/image previously recorded for this dedicated
+            // Gateway exposure instance before replacing the record.
+            let _ = stop_recorded_frpc_instance(GATEWAY_EXPOSURE_ID).await?;
             let handle = spawn_frpc_config(
                 GATEWAY_EXPOSURE_ID,
                 &cwd,

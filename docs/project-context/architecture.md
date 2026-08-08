@@ -42,6 +42,24 @@ Browser / Tauri shell
 - **Web Admin Plane** 当前强制 loopback，仅用于本机浏览器或 SSH 端口转发；在加入独立管理员认证前不得直接暴露到局域网/公网。
 - ChatGPT 只配置一次根 `/mcp`，不为每个 Workspace 创建独立插件。
 
+### Gateway Identity 与 Public Access 分离
+
+Gateway 的公网身份和传输方式必须分开建模：
+
+```text
+Gateway Identity
+  canonical public_url = https://mcp.example.com
+  MCP endpoint         = https://mcp.example.com/mcp
+  OAuth metadata       = https://mcp.example.com/...
+
+Public Access Provider
+  local | direct | external | frp | cloudflare
+```
+
+`gateway.public_url` 是稳定的 canonical external origin。FRP/Cloudflare 只是将网络流量送到 Gateway 的 provider，不允许反向决定或覆盖这个 URL。
+
+Cloudflare Quick Tunnel 返回的 `trycloudflare.com` 地址只记录为运行期 `effective_public_url`。它是临时 transport endpoint，不是 Gateway canonical identity。
+
 ## 当前项目结构
 
 ```text
@@ -55,7 +73,7 @@ coding-tools-mcp/
 │   │   ├── runtime/          # 旧 per-workspace runtime 兼容层
 │   │   ├── mcp/              # 单 Workspace MCP 协议实现，Gateway 复用
 │   │   ├── actions/          # GPT Actions 兼容服务
-│   │   ├── tunnel/           # FRP / Cloudflare 兼容层
+│   │   ├── tunnel/           # FRP / Cloudflare provider + 旧兼容层
 │   │   ├── auth/             # OAuth / Bearer
 │   │   ├── data/             # 持久化 AppData
 │   │   ├── settings/         # Gateway/Admin/下载/代理等设置
@@ -204,12 +222,43 @@ invokeCommand(command, args)
 当前 Web Admin 已优先覆盖：
 
 - Gateway 配置 / 启停 / 状态；
+- Gateway canonical 公网 URL 与 Public Access（local/direct/external/FRP/Cloudflare）；
+- Gateway 级 managed FRP/Cloudflare 的独立启停与运行状态；
 - Workspace 列表、新增、基础策略修改、移除；
 - session → workspace 路由查看与解绑；
 - 共享 MCP OAuth / Bearer 密钥；
 - 旧 per-workspace runtime 的只读状态，用于兼容导航。
 
-尚未完全迁移的桌面兼容能力包括 FRP/Cloudflare 自动管理、软件下载安装、Actions 全套配置以及部分桌面专用操作。
+尚未完全迁移的桌面兼容能力包括旧 per-workspace tunnel 的全部编辑 UI、软件下载安装、Actions 全套配置以及部分桌面专用操作。推荐 Gateway 模式已经拥有独立的 Public Access 管理。
+
+## Gateway Public Access
+
+推荐模式的公网暴露属于 Gateway，而不是 Workspace：
+
+```text
+                     canonical public URL
+                              │
+                              ▼
+                     Global MCP Gateway
+                         127.0.0.1:28766
+                              │
+                 session → selected Workspace
+
+Public Access:
+  local     → no public transport
+  direct    → bind/NAT/router managed externally
+  external  → Nginx/Caddy/VPS/WireGuard/etc.
+  frp       → one managed gateway-mcp frpc route
+  cloudflare→ one managed cloudflared process
+```
+
+- `local/direct/external` 是被动模式，不创建子进程。
+- `frp/cloudflare` 是 managed 模式，有独立于 Gateway listener 的 start/stop 生命周期。
+- 停止 Gateway 会先停止 managed exposure，避免留下指向已关闭后端的公网进程。
+- headless `coding-tools serve` 在持久化模式为 `frp/cloudflare` 时会在 Gateway 成功启动后恢复 managed exposure，适合 systemd 重启恢复。
+- Managed FRP/Cloudflare 从本机 `127.0.0.1:<gateway-port>` 回连，因此 Gateway 必须监听 loopback 或 wildcard 地址；仅绑定某个非 loopback 网卡地址时拒绝启动 managed exposure。
+- FRP 和 Cloudflare Named 模式面向 ChatGPT 时要求显式 HTTPS canonical URL。
+- Cloudflare Quick 可以没有 canonical URL，但生成地址只进入运行状态，不持久化为 Gateway identity。
 
 ## 安全边界
 

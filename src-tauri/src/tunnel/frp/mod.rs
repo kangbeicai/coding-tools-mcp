@@ -11,7 +11,7 @@ use super::TunnelServiceKind;
 pub(crate) use client::{
     acquire_frpc_operation_lock, clear_managed_frpc_pid, frpc_log_name, frpc_reconnect_loop_detected,
     managed_frpc_config_matches, probe_local_mcp_ok, probe_public_mcp_endpoint,
-    read_frpc_log_tail, spawn_frpc_config, stop_recorded_frpc_instance, FrpcHandle, PublicMcpProbe,
+    read_frpc_log_tail, spawn_frpc_config, stop_recorded_frpc_instance, PublicMcpProbe,
 };
 pub(crate) use client::{cached_frpc_path, download_frpc_to_cache};
 pub use client::{resolve_frpc, spawn_frpc};
@@ -52,6 +52,43 @@ pub(crate) fn gateway_frp_server_config(
             local_port: gateway.local_port,
             subdomain: exposure.frp_subdomain.clone(),
         },
+    }
+
+    #[test]
+    fn gateway_frp_route_uses_global_gateway_contract() {
+        let gateway = GatewayConfig {
+            local_port: 29866,
+            ..GatewayConfig::default()
+        };
+        let exposure = GatewayExposureConfig {
+            frp_profile_id: "p1".into(),
+            frp_subdomain: "coding-tools".into(),
+            ..GatewayExposureConfig::default()
+        };
+        let settings = AppSettings {
+            frp_profiles: vec![FrpProfile {
+                id: "p1".into(),
+                name: "Main".into(),
+                server: "frp.example.com".into(),
+                server_port: 7001,
+            }],
+            ..AppSettings::default()
+        };
+
+        let config = gateway_frp_server_config(
+            &gateway,
+            &exposure,
+            &settings,
+            Some("ignored-manual-token".into()),
+        );
+        assert_eq!(config.server_addr, "frp.example.com");
+        assert_eq!(config.server_port, 7001);
+        assert_eq!(config.proxy.proxy_name, "gateway-mcp");
+        assert_eq!(config.proxy.local_port, 29866);
+        assert_eq!(config.proxy.subdomain, "coding-tools");
+        // The caller passes None when a saved profile is selected; the helper
+        // itself keeps an explicit override deterministic for low-level reuse.
+        assert_eq!(config.token.as_deref(), Some("ignored-manual-token"));
     }
 }
 
@@ -305,7 +342,7 @@ fn workspace_proxy_prefix(workspace_id: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::settings::FrpProfile;
+    use crate::settings::{FrpProfile, GatewayConfig, GatewayExposureConfig};
     use crate::workspace::WorkspaceProfile;
 
     #[test]
