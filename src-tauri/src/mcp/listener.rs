@@ -105,7 +105,10 @@ pub fn spawn_listener(
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
     let profile_id = state.workspace_id.clone();
     let handle = crate::async_runtime::spawn(async move {
-        let result = serve(listener, &bind_host, port, state, shutdown_rx).await;
+        let result = match tokio::net::TcpListener::from_std(listener) {
+            Ok(listener) => serve(listener, &bind_host, port, state, shutdown_rx).await,
+            Err(err) => Err(format!("MCP 本地监听器初始化失败: {err}").into()),
+        };
         if let Err(err) = &result {
             append_profile_log(
                 &profile_id,
@@ -156,7 +159,7 @@ async fn serve(
     Ok(())
 }
 
-fn bind_listener(bind_host: &str, port: u16) -> Result<tokio::net::TcpListener, String> {
+fn bind_listener(bind_host: &str, port: u16) -> Result<std::net::TcpListener, String> {
     let ip = bind_host
         .parse::<std::net::IpAddr>()
         .map_err(|_| format!("MCP 监听地址无效: {bind_host}"))?;
@@ -166,8 +169,7 @@ fn bind_listener(bind_host: &str, port: u16) -> Result<tokio::net::TcpListener, 
     listener
         .set_nonblocking(true)
         .map_err(|err| format!("MCP 本地端口 {port} 设置非阻塞失败: {err}"))?;
-    tokio::net::TcpListener::from_std(listener)
-        .map_err(|err| format!("MCP 本地监听器初始化失败: {err}"))
+    Ok(listener)
 }
 
 async fn mcp_discovery() -> Response {
