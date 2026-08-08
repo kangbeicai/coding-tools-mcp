@@ -10,9 +10,11 @@ use crate::gateway::{
     stop_gateway_service,
 };
 use crate::health::run_gateway_health_checks;
-use crate::workspace::resources::{assign_free_workspace_ports, validate_workspace_resources_update};
-use crate::workspace::WorkspaceProfile;
 use crate::tunnel::drop_workspace as drop_tunnel_workspace;
+use crate::workspace::resources::{
+    assign_free_workspace_ports, validate_workspace_resources_update,
+};
+use crate::workspace::WorkspaceProfile;
 
 const SHARED_KEYS: &[&str] = &[
     "oauth_client_id",
@@ -45,7 +47,11 @@ pub struct RpcRequest {
 }
 
 fn gateway_is_running(state: &AppState) -> AppResult<bool> {
-    state.with_gateway(|process| Ok(process.as_ref().is_some_and(|process| !process.handle.is_finished())))
+    state.with_gateway(|process| {
+        Ok(process
+            .as_ref()
+            .is_some_and(|process| !process.handle.is_finished()))
+    })
 }
 
 fn shared_key<'a>(args: &'a Value) -> AppResult<&'a str> {
@@ -73,7 +79,11 @@ async fn dispatch_inner(state: &AppState, request: RpcRequest) -> AppResult<Valu
         "list_workspaces" => state.with_workspaces(|store| serde_value(store.list())),
         "create_workspace" => {
             let path = arg_str(&request.args, "path")?;
-            let name = request.args.get("name").and_then(Value::as_str).map(str::to_string);
+            let name = request
+                .args
+                .get("name")
+                .and_then(Value::as_str)
+                .map(str::to_string);
             state.with_workspaces(|store| {
                 let mut profile = WorkspaceProfile::new(path, name);
                 assign_free_workspace_ports(store.list(), &mut profile)?;
@@ -92,10 +102,9 @@ async fn dispatch_inner(state: &AppState, request: RpcRequest) -> AppResult<Valu
                     .ok_or_else(|| AppError::Message("缺少 profile".into()))?,
             )?;
             state.with_workspaces(|store| {
-                let current = store
-                    .get(&profile.id)
-                    .cloned()
-                    .ok_or_else(|| AppError::Message(format!("workspace not found: {}", profile.id)))?;
+                let current = store.get(&profile.id).cloned().ok_or_else(|| {
+                    AppError::Message(format!("workspace not found: {}", profile.id))
+                })?;
                 validate_workspace_resources_update(store.list(), &current, &profile)?;
                 store.update(profile)?;
                 Ok(Value::Null)
@@ -124,7 +133,9 @@ async fn dispatch_inner(state: &AppState, request: RpcRequest) -> AppResult<Valu
         }
         "get_runtime_status" => runtime_status(state, &request.args, false),
         "get_actions_runtime_status" => runtime_status(state, &request.args, true),
-        "get_last_workspace_id" => state.with_settings(|store| serde_value(store.settings().last_workspace_id)),
+        "get_last_workspace_id" => {
+            state.with_settings(|store| serde_value(store.settings().last_workspace_id))
+        }
         "set_last_workspace" => {
             let id = arg_str(&request.args, "id")?;
             state.with_settings(|store| {
@@ -213,7 +224,8 @@ async fn dispatch_inner(state: &AppState, request: RpcRequest) -> AppResult<Valu
                 store.set_shared_secret(&key, &value)?;
                 Ok(true)
             })?;
-            if changed && GATEWAY_SHARED_KEYS.contains(&key.as_str()) && gateway_is_running(state)? {
+            if changed && GATEWAY_SHARED_KEYS.contains(&key.as_str()) && gateway_is_running(state)?
+            {
                 let _ = restart_gateway_service(state).await?;
             }
             Ok(Value::Null)

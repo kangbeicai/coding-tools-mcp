@@ -212,8 +212,8 @@ struct ServicePaths {
 
 #[cfg(target_os = "linux")]
 fn service_paths() -> AppResult<ServicePaths> {
-    let config = dirs::config_dir()
-        .ok_or_else(|| AppError::Message("无法确定 XDG config 目录。".into()))?;
+    let config =
+        dirs::config_dir().ok_or_else(|| AppError::Message("无法确定 XDG config 目录。".into()))?;
     let data = dirs::data_local_dir()
         .ok_or_else(|| AppError::Message("无法确定 XDG data 目录。".into()))?;
     let root = data.join("coding-tools");
@@ -341,7 +341,9 @@ fn atomic_write(path: &Path, contents: &[u8]) -> AppResult<()> {
 
 #[cfg(target_os = "linux")]
 fn run_systemctl(args: &[&str]) -> AppResult<()> {
-    let output = std::process::Command::new("systemctl").args(args).output()?;
+    let output = std::process::Command::new("systemctl")
+        .args(args)
+        .output()?;
     if output.status.success() {
         return Ok(());
     }
@@ -405,7 +407,10 @@ mod tests {
 
     #[test]
     fn unit_uses_restart_and_graceful_sigint() {
-        let unit = build_unit(Path::new("/opt/coding tools/coding-tools"), Path::new("/opt/web"));
+        let unit = build_unit(
+            Path::new("/opt/coding tools/coding-tools"),
+            Path::new("/opt/web"),
+        );
         assert!(unit.contains(MANAGED_MARKER));
         assert!(unit.contains("Restart=on-failure"));
         assert!(unit.contains("KillSignal=SIGINT"));

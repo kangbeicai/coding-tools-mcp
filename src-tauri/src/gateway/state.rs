@@ -239,7 +239,9 @@ impl GatewayState {
         match matches.as_slice() {
             [workspace] => Ok(workspace.info.id.clone()),
             [] => Err(format!("找不到工作区: {selector}")),
-            _ => Err(format!("存在多个同名工作区“{selector}”，请使用 workspace id")),
+            _ => Err(format!(
+                "存在多个同名工作区“{selector}”，请使用 workspace id"
+            )),
         }
     }
 }
@@ -273,4 +275,3 @@ mod tests {
         assert_eq!(normalize_workspace_selector("abc123"), "abc123");
     }
 }
-

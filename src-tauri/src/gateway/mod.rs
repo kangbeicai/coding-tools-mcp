@@ -12,15 +12,14 @@ mod server;
 mod service;
 mod state;
 
-pub use listener::{spawn_listener, GatewayProcess};
 pub use exposure::{
     gateway_exposure_status, get_gateway_exposure_config, normalize_public_origin,
     set_gateway_exposure_config, start_gateway_exposure_service, stop_gateway_exposure_service,
     GatewayExposureProcess, GatewayExposureStatusDto,
 };
+pub use listener::{spawn_listener, GatewayProcess};
 pub use service::{
     gateway_status, get_gateway_config, restart_gateway_service, set_gateway_config,
     start_gateway_service, stop_gateway_service, GatewayStatusDto,
 };
 pub use state::{GatewaySessionInfo, GatewayState, GatewayWorkspaceInfo, SharedGatewayState};
-

@@ -31,8 +31,12 @@ pub fn spawn_admin_listener(
     web_root: PathBuf,
 ) -> Result<AdminProcess, String> {
     let bind_ip = parse_loopback(&config.bind_host)?;
-    let listener = std::net::TcpListener::bind((bind_ip, config.local_port))
-        .map_err(|error| format!("Admin 地址 {}:{} 绑定失败: {error}", config.bind_host, config.local_port))?;
+    let listener = std::net::TcpListener::bind((bind_ip, config.local_port)).map_err(|error| {
+        format!(
+            "Admin 地址 {}:{} 绑定失败: {error}",
+            config.bind_host, config.local_port
+        )
+    })?;
     listener
         .set_nonblocking(true)
         .map_err(|error| format!("Admin 监听器设置非阻塞失败: {error}"))?;
@@ -86,7 +90,11 @@ async fn api_health() -> Json<serde_json::Value> {
 
 async fn static_file(State(state): State<AdminState>, OriginalUri(uri): OriginalUri) -> Response {
     let relative = uri.path().trim_start_matches('/');
-    let relative = if relative.is_empty() { "index.html" } else { relative };
+    let relative = if relative.is_empty() {
+        "index.html"
+    } else {
+        relative
+    };
     let requested = match safe_relative_path(relative) {
         Some(path) => state.web_root.join(path),
         None => return StatusCode::NOT_FOUND.into_response(),
@@ -111,9 +119,12 @@ async fn static_file(State(state): State<AdminState>, OriginalUri(uri): Original
 fn safe_relative_path(value: &str) -> Option<PathBuf> {
     let path = PathBuf::from(value);
     if path.is_absolute()
-        || path
-            .components()
-            .any(|component| matches!(component, Component::ParentDir | Component::RootDir | Component::Prefix(_)))
+        || path.components().any(|component| {
+            matches!(
+                component,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
+        })
     {
         return None;
     }
@@ -122,15 +133,18 @@ fn safe_relative_path(value: &str) -> Option<PathBuf> {
 
 fn bytes_response(bytes: Vec<u8>, content_type: &'static str) -> Response {
     let mut response = Response::new(Body::from(bytes));
-    response.headers_mut().insert(
-        header::CONTENT_TYPE,
-        HeaderValue::from_static(content_type),
-    );
+    response
+        .headers_mut()
+        .insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
     response
 }
 
 fn content_type(path: &std::path::Path) -> &'static str {
-    match path.extension().and_then(|value| value.to_str()).unwrap_or("") {
+    match path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("")
+    {
         "html" => "text/html; charset=utf-8",
         "js" => "text/javascript; charset=utf-8",
         "css" => "text/css; charset=utf-8",

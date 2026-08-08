@@ -164,12 +164,7 @@ pub async fn start_gateway_exposure_service(
             } else {
                 None
             };
-            let config = gateway_frp_server_config(
-                &gateway,
-                &exposure,
-                &settings,
-                inline_token,
-            );
+            let config = gateway_frp_server_config(&gateway, &exposure, &settings, inline_token);
             // A hard-killed server can leave its managed frpc child alive.
             // Reclaim only the PID/image previously recorded for this dedicated
             // Gateway exposure instance before replacing the record.
@@ -200,8 +195,7 @@ pub async fn start_gateway_exposure_service(
             if cloudflare_mode == "named" {
                 require_https_canonical(&canonical, "Cloudflare named tunnel")?;
             }
-            let token = SecretStore::get_shared("gateway_cloudflare_token")?
-                .unwrap_or_default();
+            let token = SecretStore::get_shared("gateway_cloudflare_token")?.unwrap_or_default();
             let handle = spawn_cloudflare_tunnel(
                 gateway.local_port,
                 &cwd,
@@ -245,14 +239,19 @@ pub async fn stop_gateway_exposure_service(
 
 pub fn normalize_public_origin(value: &str) -> AppResult<String> {
     let raw = value.trim().trim_end_matches('/');
-    let raw = raw.strip_suffix("/mcp").unwrap_or(raw).trim_end_matches('/');
+    let raw = raw
+        .strip_suffix("/mcp")
+        .unwrap_or(raw)
+        .trim_end_matches('/');
     if raw.is_empty() {
         return Ok(String::new());
     }
     let parsed = reqwest::Url::parse(raw)
         .map_err(|error| AppError::Message(format!("公网 URL 无效: {error}")))?;
     if !matches!(parsed.scheme(), "http" | "https") {
-        return Err(AppError::Message("公网 URL 只支持 http:// 或 https://。".into()));
+        return Err(AppError::Message(
+            "公网 URL 只支持 http:// 或 https://。".into(),
+        ));
     }
     if parsed.path() != "/" || parsed.query().is_some() || parsed.fragment().is_some() {
         return Err(AppError::Message(

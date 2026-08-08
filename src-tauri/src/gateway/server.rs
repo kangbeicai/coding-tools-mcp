@@ -108,10 +108,7 @@ fn handle_tools_call(
                     state,
                 ));
             };
-            let selector = args
-                .get("workspace")
-                .and_then(Value::as_str)
-                .unwrap_or("");
+            let selector = args.get("workspace").and_then(Value::as_str).unwrap_or("");
             match state.select_workspace(session_key, selector) {
                 Ok(workspace) => Ok(wrap_mcp_tool_result(
                     name,
@@ -202,7 +199,10 @@ fn inject_session_metadata(body: &Value, session_key: Option<&str>) -> Value {
     if !forwarded.get("params").is_some_and(Value::is_object) {
         forwarded["params"] = json!({});
     }
-    if !forwarded["params"].get("_meta").is_some_and(Value::is_object) {
+    if !forwarded["params"]
+        .get("_meta")
+        .is_some_and(Value::is_object)
+    {
         forwarded["params"]["_meta"] = json!({});
     }
     forwarded["params"]["_meta"]["openai/session"] = Value::String(session_key.to_string());
@@ -282,4 +282,3 @@ mod tests {
         );
     }
 }
-

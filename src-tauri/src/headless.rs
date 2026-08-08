@@ -32,11 +32,15 @@ pub fn run_from_env() -> Result<(), String> {
         Some("install-service") => service_install_command(&args[1..]),
         Some("uninstall-service") => service_uninstall_command(&args[1..]),
         Some("health") => health_command(&args[1..]),
-        Some(other) => Err(format!("未知命令: {other}\n运行 `coding-tools --help` 查看用法")),
+        Some(other) => Err(format!(
+            "未知命令: {other}\n运行 `coding-tools --help` 查看用法"
+        )),
     }
 }
 
-async fn health_via_admin(admin: &AdminConfig) -> Result<crate::health::GatewayHealthReport, String> {
+async fn health_via_admin(
+    admin: &AdminConfig,
+) -> Result<crate::health::GatewayHealthReport, String> {
     let host = match admin.bind_host.trim().parse::<std::net::IpAddr>() {
         Ok(std::net::IpAddr::V6(ip)) => format!("[{ip}]"),
         Ok(std::net::IpAddr::V4(ip)) if ip.is_unspecified() => "127.0.0.1".into(),
@@ -149,7 +153,10 @@ fn service_uninstall_command(args: &[String]) -> Result<(), String> {
     }
     let before = systemd::uninstall(keep_bundle, dry_run).map_err(|error| error.to_string())?;
     if dry_run {
-        println!("systemd uninstall dry-run：当前 installed={}", before.installed);
+        println!(
+            "systemd uninstall dry-run：当前 installed={}",
+            before.installed
+        );
         println!("Unit: {}", before.unit_path.display());
     } else {
         println!("Coding Tools user service 已卸载。");
@@ -195,11 +202,20 @@ fn health_command(args: &[String]) -> Result<(), String> {
     })?;
     let ready = report.chatgpt_ready;
     if json {
-        println!("{}", serde_json::to_string_pretty(&report).map_err(|error| error.to_string())?);
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&report).map_err(|error| error.to_string())?
+        );
     } else {
         println!("{}", report.summary);
         for item in &report.items {
-            println!("[{:<4}] {:<9} {:<24} {}", item.status.to_ascii_uppercase(), item.layer, item.label, item.detail);
+            println!(
+                "[{:<4}] {:<9} {:<24} {}",
+                item.status.to_ascii_uppercase(),
+                item.layer,
+                item.label,
+                item.detail
+            );
             if !item.hint.is_empty() {
                 println!("       建议: {}", item.hint);
             }
@@ -218,8 +234,13 @@ fn run_server(tui: bool, args: &[String]) -> Result<(), String> {
 
     app.with_settings(|store| {
         let mut settings = store.settings();
-        apply_overrides(&mut settings.gateway, &mut settings.admin, &mut web_root, args)
-            .map_err(crate::error::AppError::Message)?;
+        apply_overrides(
+            &mut settings.gateway,
+            &mut settings.admin,
+            &mut web_root,
+            args,
+        )
+        .map_err(crate::error::AppError::Message)?;
         store.update_settings(settings)
     })
     .map_err(|error| error.to_string())?;
@@ -238,7 +259,9 @@ fn run_server(tui: bool, args: &[String]) -> Result<(), String> {
         "frp" | "cloudflare"
     );
     let exposure_start = if gateway_start.is_ok() && managed_exposure {
-        Some(crate::async_runtime::block_on(start_gateway_exposure_service(&app)))
+        Some(crate::async_runtime::block_on(
+            start_gateway_exposure_service(&app),
+        ))
     } else {
         None
     };
@@ -257,7 +280,9 @@ fn run_server(tui: bool, args: &[String]) -> Result<(), String> {
             }
             Err(error) => {
                 println!("  MCP Gateway: not started ({error})");
-                println!("               Open Web Admin, add/fix a workspace, then start Gateway there.");
+                println!(
+                    "               Open Web Admin, add/fix a workspace, then start Gateway there."
+                );
             }
         }
         if let Some(result) = exposure_start {
@@ -303,18 +328,26 @@ fn run_terminal_ui(app: Arc<AppState>, admin: AdminProcess) -> Result<(), String
         println!("│ Coding Tools Gateway · lightweight terminal monitor      │");
         println!("├──────────────────────────────────────────────────────────┤");
         println!("│ Gateway    {:<46} │", status.state);
-        println!("│ MCP        {:<46} │", truncate(&status.local_endpoint, 46));
+        println!(
+            "│ MCP        {:<46} │",
+            truncate(&status.local_endpoint, 46)
+        );
         println!("│ Web Admin  {:<46} │", truncate(&admin.local_endpoint, 46));
         println!("│ Workspaces {:<46} │", status.workspace_count);
         println!("│ Sessions   {:<46} │", status.session_count);
-        println!("│ Exposure   {:<46} │", truncate(&format!("{} / {}", exposure.mode, exposure.state), 46));
+        println!(
+            "│ Exposure   {:<46} │",
+            truncate(&format!("{} / {}", exposure.mode, exposure.state), 46)
+        );
         println!("└──────────────────────────────────────────────────────────┘");
         println!();
         println!("Web Console is the primary UI. This terminal view is intentionally minimal.");
         print!("[r]刷新  [s]会话  [q]退出 > ");
         io::stdout().flush().map_err(|error| error.to_string())?;
         let mut command = String::new();
-        stdin.read_line(&mut command).map_err(|error| error.to_string())?;
+        stdin
+            .read_line(&mut command)
+            .map_err(|error| error.to_string())?;
         match command.trim().to_ascii_lowercase().as_str() {
             "q" | "quit" | "exit" => break,
             "s" | "sessions" => {
@@ -379,9 +412,18 @@ fn config_command(args: &[String]) -> Result<(), String> {
             println!("gateway.publicUrl={}", settings.gateway.public_url);
             println!("gateway.authType={}", settings.gateway.auth_type);
             println!("gateway.exposure.mode={}", settings.gateway_exposure.mode);
-            println!("gateway.exposure.frpProfileId={}", settings.gateway_exposure.frp_profile_id);
-            println!("gateway.exposure.frpSubdomain={}", settings.gateway_exposure.frp_subdomain);
-            println!("gateway.exposure.cloudflareMode={}", settings.gateway_exposure.cloudflare_mode);
+            println!(
+                "gateway.exposure.frpProfileId={}",
+                settings.gateway_exposure.frp_profile_id
+            );
+            println!(
+                "gateway.exposure.frpSubdomain={}",
+                settings.gateway_exposure.frp_subdomain
+            );
+            println!(
+                "gateway.exposure.cloudflareMode={}",
+                settings.gateway_exposure.cloudflare_mode
+            );
             println!("admin.bindHost={}", settings.admin.bind_host);
             println!("admin.localPort={}", settings.admin.local_port);
             Ok(())
@@ -483,7 +525,9 @@ fn pause_with(message: &str) -> Result<(), String> {
     print!("{message}");
     io::stdout().flush().map_err(|error| error.to_string())?;
     let mut line = String::new();
-    io::stdin().read_line(&mut line).map_err(|error| error.to_string())?;
+    io::stdin()
+        .read_line(&mut line)
+        .map_err(|error| error.to_string())?;
     Ok(())
 }
 
@@ -491,7 +535,13 @@ fn truncate(value: &str, max_chars: usize) -> String {
     if value.chars().count() <= max_chars {
         return value.to_string();
     }
-    format!("{}…", value.chars().take(max_chars.saturating_sub(1)).collect::<String>())
+    format!(
+        "{}…",
+        value
+            .chars()
+            .take(max_chars.saturating_sub(1))
+            .collect::<String>()
+    )
 }
 
 fn redact_session(value: &str) -> String {
@@ -524,7 +574,9 @@ fn print_help() {
     println!();
     println!("Linux headless build:");
     println!("  npm ci && npm run build");
-    println!("  cargo build --release --no-default-features --features headless --bin coding-tools");
+    println!(
+        "  cargo build --release --no-default-features --features headless --bin coding-tools"
+    );
     println!();
     println!("Remote admin:");
     println!("  ssh -L 28767:127.0.0.1:28767 user@server");

@@ -67,8 +67,7 @@ pub async fn stop_gateway_service(state: &AppState) -> AppResult<GatewayStatusDt
 }
 
 pub async fn restart_gateway_service(state: &AppState) -> AppResult<GatewayStatusDto> {
-    let exposure_was_running =
-        state.with_gateway_exposure(|process| Ok(process.is_some()))?;
+    let exposure_was_running = state.with_gateway_exposure(|process| Ok(process.is_some()))?;
     let _ = stop_gateway_service(state).await?;
     let status = start_gateway_service(state).await?;
     if exposure_was_running {
@@ -79,8 +78,7 @@ pub async fn restart_gateway_service(state: &AppState) -> AppResult<GatewayStatu
 
 pub fn gateway_status(state: &AppState) -> AppResult<GatewayStatusDto> {
     let config = get_gateway_config(state)?;
-    let registered_workspace_count =
-        state.with_workspaces(|store| Ok(store.list().len()))?;
+    let registered_workspace_count = state.with_workspaces(|store| Ok(store.list().len()))?;
     state.with_gateway(|process| {
         let Some(process) = process.as_ref() else {
             return Ok(GatewayStatusDto {

@@ -48,7 +48,10 @@ pub async fn run_gateway_health_checks(state: &AppState) -> AppResult<GatewayHea
     let canonical = normalize_public_origin(&gateway.public_url)?;
     let mode = exposure_config.mode.trim().to_ascii_lowercase();
     let effective = if !exposure_status.effective_public_url.trim().is_empty() {
-        exposure_status.effective_public_url.trim_end_matches('/').to_string()
+        exposure_status
+            .effective_public_url
+            .trim_end_matches('/')
+            .to_string()
     } else {
         canonical.clone()
     };
@@ -85,7 +88,9 @@ pub async fn run_gateway_health_checks(state: &AppState) -> AppResult<GatewayHea
     let public_required = mode != "local";
     let canonical_https = canonical.to_ascii_lowercase().starts_with("https://");
     let quick_without_canonical = mode == "cloudflare"
-        && exposure_config.cloudflare_mode.eq_ignore_ascii_case("quick")
+        && exposure_config
+            .cloudflare_mode
+            .eq_ignore_ascii_case("quick")
         && canonical.is_empty();
     items.push(if !public_required {
         skip_item(
@@ -136,7 +141,12 @@ pub async fn run_gateway_health_checks(state: &AppState) -> AppResult<GatewayHea
                 ("oauth_token_secret", oauth_token_secret.as_deref()),
             ]
             .into_iter()
-            .filter_map(|(key, value)| value.filter(|v| !v.trim().is_empty()).is_none().then_some(key))
+            .filter_map(|(key, value)| {
+                value
+                    .filter(|v| !v.trim().is_empty())
+                    .is_none()
+                    .then_some(key)
+            })
             .collect::<Vec<_>>();
             if missing.is_empty() {
                 items.push(ok_item(
@@ -158,7 +168,9 @@ pub async fn run_gateway_health_checks(state: &AppState) -> AppResult<GatewayHea
             }
         }
         "bearer" => {
-            let ok = bearer.as_deref().is_some_and(|value| !value.trim().is_empty());
+            let ok = bearer
+                .as_deref()
+                .is_some_and(|value| !value.trim().is_empty());
             items.push(if ok {
                 ok_item(
                     "auth_config",
@@ -361,58 +373,55 @@ pub async fn run_gateway_health_checks(state: &AppState) -> AppResult<GatewayHea
     });
 
     let expected_oauth_base = connector_base.clone();
-    let oauth_metadata_ok = if auth_type == "oauth" && provider_required && !expected_oauth_base.is_empty() {
-        let auth_meta = endpoint(
-            &connector_base,
-            "/.well-known/oauth-authorization-server",
-        );
-        let protected_meta = endpoint(
-            &connector_base,
-            "/.well-known/oauth-protected-resource",
-        );
-        let auth_result = check_authorization_metadata(&client, &auth_meta, &expected_oauth_base).await;
-        let protected_result =
-            check_protected_resource_metadata(&client, &protected_meta, &expected_oauth_base).await;
-        let ok = auth_result.0 && protected_result.0;
-        items.push(if ok {
-            ok_item(
-                "oauth_metadata",
-                "oauth",
-                "OAuth Metadata",
-                format!("{}; {}", auth_result.1, protected_result.1),
-            )
-        } else {
-            fail_item(
+    let oauth_metadata_ok =
+        if auth_type == "oauth" && provider_required && !expected_oauth_base.is_empty() {
+            let auth_meta = endpoint(&connector_base, "/.well-known/oauth-authorization-server");
+            let protected_meta = endpoint(&connector_base, "/.well-known/oauth-protected-resource");
+            let auth_result =
+                check_authorization_metadata(&client, &auth_meta, &expected_oauth_base).await;
+            let protected_result =
+                check_protected_resource_metadata(&client, &protected_meta, &expected_oauth_base)
+                    .await;
+            let ok = auth_result.0 && protected_result.0;
+            items.push(if ok {
+                ok_item(
+                    "oauth_metadata",
+                    "oauth",
+                    "OAuth Metadata",
+                    format!("{}; {}", auth_result.1, protected_result.1),
+                )
+            } else {
+                fail_item(
                 "oauth_metadata",
                 "oauth",
                 "OAuth Metadata",
                 format!("{}; {}", auth_result.1, protected_result.1),
                 "确认 canonical URL 与实际 HTTPS 入口一致，反向代理必须转发 Host/X-Forwarded-*。",
             )
-        });
-        ok
-    } else if auth_type == "oauth" && provider_required {
-        items.push(fail_item(
-            "oauth_metadata",
-            "oauth",
-            "OAuth Metadata",
-            "没有可检查的公网 OAuth base URL".into(),
-            "先建立公网 endpoint。",
-        ));
-        false
-    } else {
-        items.push(skip_item(
-            "oauth_metadata",
-            "oauth",
-            "OAuth Metadata",
-            if auth_type == "oauth" {
-                "Local-only 模式不执行公网 OAuth 检查".into()
-            } else {
-                format!("认证模式为 {auth_type}")
-            },
-        ));
-        true
-    };
+            });
+            ok
+        } else if auth_type == "oauth" && provider_required {
+            items.push(fail_item(
+                "oauth_metadata",
+                "oauth",
+                "OAuth Metadata",
+                "没有可检查的公网 OAuth base URL".into(),
+                "先建立公网 endpoint。",
+            ));
+            false
+        } else {
+            items.push(skip_item(
+                "oauth_metadata",
+                "oauth",
+                "OAuth Metadata",
+                if auth_type == "oauth" {
+                    "Local-only 模式不执行公网 OAuth 检查".into()
+                } else {
+                    format!("认证模式为 {auth_type}")
+                },
+            ));
+            true
+        };
 
     let chatgpt_ready = workspace_count > 0
         && auth_ok
@@ -466,7 +475,10 @@ async fn check_authorization_metadata(
     let expected_base = expected_base.trim_end_matches('/');
     match get_json(client, url).await {
         Ok(value) => {
-            let issuer = value.get("issuer").and_then(serde_json::Value::as_str).unwrap_or("");
+            let issuer = value
+                .get("issuer")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("");
             let authorize = value
                 .get("authorization_endpoint")
                 .and_then(serde_json::Value::as_str)
@@ -478,10 +490,7 @@ async fn check_authorization_metadata(
             let ok = issuer == expected_base
                 && authorize == format!("{expected_base}/oauth/authorize")
                 && token == format!("{expected_base}/oauth/token");
-            (
-                ok,
-                format!("authorization metadata issuer={issuer}"),
-            )
+            (ok, format!("authorization metadata issuer={issuer}"))
         }
         Err(error) => (false, error),
     }
@@ -517,7 +526,11 @@ async fn check_protected_resource_metadata(
 }
 
 async fn get_json(client: &reqwest::Client, url: &str) -> Result<serde_json::Value, String> {
-    let response = client.get(url).send().await.map_err(|error| error.to_string())?;
+    let response = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|error| error.to_string())?;
     let status = response.status();
     if !status.is_success() {
         return Err(format!("{url} -> HTTP {}", status.as_u16()));
@@ -540,23 +553,11 @@ fn ok_item(key: &str, layer: &str, label: &str, detail: String) -> GatewayHealth
     item(key, layer, label, "ok", detail, String::new())
 }
 
-fn warn_item(
-    key: &str,
-    layer: &str,
-    label: &str,
-    detail: String,
-    hint: &str,
-) -> GatewayHealthItem {
+fn warn_item(key: &str, layer: &str, label: &str, detail: String, hint: &str) -> GatewayHealthItem {
     item(key, layer, label, "warn", detail, hint.into())
 }
 
-fn fail_item(
-    key: &str,
-    layer: &str,
-    label: &str,
-    detail: String,
-    hint: &str,
-) -> GatewayHealthItem {
+fn fail_item(key: &str, layer: &str, label: &str, detail: String, hint: &str) -> GatewayHealthItem {
     item(key, layer, label, "fail", detail, hint.into())
 }
 

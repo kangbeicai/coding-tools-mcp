@@ -14,8 +14,8 @@ use crate::auth::{
     protected_resource_metadata, token_exchange, verify_bearer_header, verify_oauth_bearer_header,
     AuthorizeForm, AuthorizeParams, OAuthRuntime, TokenForm,
 };
-use crate::gateway::server::handle_request;
 use crate::gateway::normalize_public_origin;
+use crate::gateway::server::handle_request;
 use crate::gateway::state::{GatewayState, SharedGatewayState};
 use crate::secret::SecretStore;
 use crate::settings::GatewayConfig;
@@ -95,8 +95,8 @@ pub fn spawn_listener(
 
     let bind_host = config.bind_host.trim().to_string();
     let port = config.local_port;
-    let configured_public_url = normalize_public_origin(&config.public_url)
-        .map_err(|error| error.to_string())?;
+    let configured_public_url =
+        normalize_public_origin(&config.public_url).map_err(|error| error.to_string())?;
     let oauth = if auth.oauth_enabled() {
         let base = external_base_url(&HeaderMap::new(), port, &configured_public_url);
         Some(Arc::new(OAuthRuntime::new(
@@ -228,7 +228,11 @@ async fn dispatch_request(
     }
 
     let request_id = body.get("id").cloned().unwrap_or(Value::Null);
-    let method = body.get("method").and_then(Value::as_str).unwrap_or("").to_string();
+    let method = body
+        .get("method")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
     let tool_name = body
         .get("params")
         .and_then(|params| params.get("name"))
@@ -262,7 +266,10 @@ async fn dispatch_request(
             append_profile_log(
                 GATEWAY_LOG_ID,
                 "mcp-requests.log",
-                &format!("[rpc] completed id={} method={} tool={}", request_id, method, tool_name),
+                &format!(
+                    "[rpc] completed id={} method={} tool={}",
+                    request_id, method, tool_name
+                ),
             );
             Json(response).into_response()
         }
@@ -347,7 +354,10 @@ async fn oauth_protected_resource_metadata(
     if !state.auth.oauth_enabled() {
         return oauth_not_configured();
     }
-    Json(protected_resource_metadata(&resolve_oauth_base(&state, &headers))).into_response()
+    Json(protected_resource_metadata(&resolve_oauth_base(
+        &state, &headers,
+    )))
+    .into_response()
 }
 
 async fn oauth_authorize_get(
@@ -412,7 +422,9 @@ mod tests {
 
     #[test]
     fn wildcard_bind_still_displays_a_connectable_local_url() {
-        assert_eq!(local_endpoint("0.0.0.0", 28766), "http://127.0.0.1:28766/mcp");
+        assert_eq!(
+            local_endpoint("0.0.0.0", 28766),
+            "http://127.0.0.1:28766/mcp"
+        );
     }
 }
-
