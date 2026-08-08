@@ -177,7 +177,8 @@
   }
 </script>
 
-<div class="mx-auto grid w-full max-w-5xl gap-5 p-6">
+<section class="page-scroll">
+  <div class="mx-auto grid w-full max-w-5xl gap-5 p-6">
   <section class="tx-card p-5">
     <div class="flex flex-wrap items-start justify-between gap-4">
       <div>
@@ -476,5 +477,6 @@
       但这些路径不需要在 ChatGPT 中分别创建插件。
     </p>
   </section>
-</div>
+  </div>
+</section>
 

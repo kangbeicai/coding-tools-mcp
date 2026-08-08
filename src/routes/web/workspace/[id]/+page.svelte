@@ -62,7 +62,8 @@
   }
 </script>
 
-<div class="mx-auto grid w-full max-w-5xl gap-5 p-6">
+<section class="page-scroll">
+  <div class="mx-auto grid w-full max-w-5xl gap-5 p-6">
   {#if profile}
     <section class="tx-card p-5">
       <div class="flex flex-wrap items-start justify-between gap-4">
@@ -155,4 +156,5 @@
       <p class="mt-2 text-sm text-[var(--color-text-muted)]">该工作区可能已被删除或配置尚未刷新。</p>
     </section>
   {/if}
-</div>
+  </div>
+</section>
