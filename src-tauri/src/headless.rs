@@ -42,6 +42,7 @@ fn run_server(tui: bool, args: &[String]) -> Result<(), String> {
     let admin_config = app
         .with_settings(|store| Ok(store.settings().admin))
         .map_err(|error| error.to_string())?;
+    let admin_port = admin_config.local_port;
     let admin = spawn_admin_listener(app.clone(), admin_config, web_root)?;
     let gateway_start = crate::async_runtime::block_on(start_gateway_service(&app));
 
@@ -65,8 +66,8 @@ fn run_server(tui: bool, args: &[String]) -> Result<(), String> {
         println!("  Web Admin  : {}", admin.local_endpoint);
         println!();
         println!("Remote Linux admin (recommended):");
-        println!("  ssh -L 28767:127.0.0.1:28767 user@server");
-        println!("  then open http://127.0.0.1:28767");
+        println!("  ssh -L {admin_port}:127.0.0.1:{admin_port} user@server");
+        println!("  then open http://127.0.0.1:{admin_port}");
         println!("Press Ctrl+C to stop.");
 
         crate::async_runtime::block_on(async {
