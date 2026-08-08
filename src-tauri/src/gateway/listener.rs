@@ -67,10 +67,17 @@ pub fn spawn_listener(
         return Err("Gateway Bearer 认证已启用，但共享 bearer_token 不存在".into());
     }
 
-    // Match the legacy MCP listener: ChatGPT uses PKCE and client_secret is
-    // optional. The gateway therefore only needs the shared Client ID,
-    // authorization password and token-signing secret.
-    let oauth_client_secret = None;
+    // Support both OAuth client styles used by ChatGPT:
+    // - public client + PKCE (client_secret absent)
+    // - confidential client from manual OAuth settings (client_secret present,
+    //   PKCE parameters may be omitted on /oauth/authorize)
+    let oauth_client_secret = if auth.oauth_enabled() {
+        SecretStore::get_shared("oauth_client_secret")
+            .map_err(|error| error.to_string())?
+            .filter(|value| !value.is_empty())
+    } else {
+        None
+    };
     let oauth_password = if auth.oauth_enabled() {
         SecretStore::get_shared("oauth_password")
             .map_err(|error| error.to_string())?
