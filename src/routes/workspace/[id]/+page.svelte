@@ -281,6 +281,19 @@
     await load();
   }
 
+  async function saveMcpBindHost(bindHost: string) {
+    if (!profile) return;
+    const current = profile.runtime.bind_host ?? "127.0.0.1";
+    if (current === bindHost) return;
+    const next: WorkspaceProfile = {
+      ...profile,
+      runtime: { ...profile.runtime, bind_host: bindHost },
+    };
+    await updateWorkspace(next);
+    profile = next;
+    await load();
+  }
+
   async function saveActionsPort(port: number) {
     if (!profile) return;
     const current = actionsConfig(profile);
@@ -594,6 +607,8 @@
             statusMessage={mcpStatusMessage}
             port={profile.runtime.local_port}
             portEditable={true}
+            bindHost={profile.runtime.bind_host ?? "127.0.0.1"}
+            bindHostEditable={true}
             busy={mcpBusy}
             tunnelType={profile.tunnel.type}
             localEndpoint={mcpLocal || mcpLocalEndpoint(profile.runtime.local_port)}
@@ -601,6 +616,7 @@
             publicLabel="公网 MCP"
             onToggle={toggleMcp}
             onPortChange={saveMcpPort}
+            onBindHostChange={saveMcpBindHost}
           />
           <GptQuickCopy
             workspaceId={workspaceId!}

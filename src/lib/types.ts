@@ -22,6 +22,7 @@ export interface AuthConfig {
 
 export interface RuntimeConfig {
   local_port: number;
+  bind_host?: string;
   tool_profile: string;
   permission_mode: string;
   runtime_command?: string;

@@ -5,6 +5,93 @@ use serde::{Deserialize, Serialize};
 use crate::data::AppData;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdminConfig {
+    /// Admin Web Console defaults to loopback only. Remote administration
+    /// should normally use SSH port forwarding rather than exposing this port.
+    #[serde(default = "default_admin_bind_host")]
+    pub bind_host: String,
+    #[serde(default = "default_admin_port")]
+    pub local_port: u16,
+}
+
+fn default_admin_bind_host() -> String {
+    "127.0.0.1".to_string()
+}
+
+fn default_admin_port() -> u16 {
+    28767
+}
+
+impl Default for AdminConfig {
+    fn default() -> Self {
+        Self {
+            bind_host: default_admin_bind_host(),
+            local_port: default_admin_port(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GatewayConfig {
+    /// Interface address for the single multi-workspace MCP gateway.
+    #[serde(default = "default_gateway_bind_host")]
+    pub bind_host: String,
+    /// Local port used by the single ChatGPT connector endpoint.
+    #[serde(default = "default_gateway_port")]
+    pub local_port: u16,
+    /// Optional externally reachable HTTPS base URL, without a trailing `/mcp`.
+    #[serde(default)]
+    pub public_url: String,
+    /// `oauth`, `bearer`, or `noauth`. Gateway auth always uses shared secrets.
+    #[serde(default = "default_gateway_auth_type")]
+    pub auth_type: String,
+    /// Stable tool catalog exposed by the gateway. Workspace policies still
+    /// control what each selected workspace is allowed to execute.
+    #[serde(default = "default_gateway_tool_profile")]
+    pub tool_profile: String,
+    /// When only one workspace exists, allow requests to use it before an
+    /// explicit `select_workspace` call. With 2+ workspaces selection is
+    /// always required to prevent accidental cross-project operations.
+    #[serde(default = "default_gateway_auto_select_single")]
+    pub auto_select_single_workspace: bool,
+}
+
+fn default_gateway_bind_host() -> String {
+    "127.0.0.1".to_string()
+}
+
+fn default_gateway_port() -> u16 {
+    28766
+}
+
+fn default_gateway_auth_type() -> String {
+    "oauth".to_string()
+}
+
+fn default_gateway_tool_profile() -> String {
+    "core".to_string()
+}
+
+fn default_gateway_auto_select_single() -> bool {
+    true
+}
+
+impl Default for GatewayConfig {
+    fn default() -> Self {
+        Self {
+            bind_host: default_gateway_bind_host(),
+            local_port: default_gateway_port(),
+            public_url: String::new(),
+            auth_type: default_gateway_auth_type(),
+            tool_profile: default_gateway_tool_profile(),
+            auto_select_single_workspace: default_gateway_auto_select_single(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FrpProfile {
     pub id: String,
     pub name: String,
@@ -75,6 +162,14 @@ pub struct AppSettings {
     /// Global outbound proxy (Cloudflare tunnel, etc.).
     #[serde(default)]
     pub proxy: ProxyConfig,
+    /// Global single-URL MCP gateway. This is independent from legacy
+    /// per-workspace MCP listener settings.
+    #[serde(default)]
+    pub gateway: GatewayConfig,
+    /// Local Web management plane. Kept separate from the public MCP data
+    /// plane so the admin API does not need to be exposed to ChatGPT.
+    #[serde(default)]
+    pub admin: AdminConfig,
     /// Shared secrets indexed by key name (e.g. "bearer_token").
     /// Persisted alongside other app settings in app_settings.json.
     #[serde(default)]
@@ -106,6 +201,8 @@ impl AppSettings {
             last_workspace_id: data.last_workspace_id.clone(),
             download: data.download.clone(),
             proxy: data.proxy.clone(),
+            gateway: data.gateway.clone(),
+            admin: data.admin.clone(),
             shared_secrets: data.shared_secrets.clone(),
             workspace_secrets: data.workspace_secrets.clone(),
             app_secrets: data.app_secrets.clone(),
@@ -117,6 +214,8 @@ impl AppSettings {
         data.last_workspace_id = self.last_workspace_id.clone();
         data.download = self.download.clone();
         data.proxy = self.proxy.clone();
+        data.gateway = self.gateway.clone();
+        data.admin = self.admin.clone();
         data.shared_secrets = self.shared_secrets.clone();
         data.workspace_secrets = self.workspace_secrets.clone();
         data.app_secrets = self.app_secrets.clone();

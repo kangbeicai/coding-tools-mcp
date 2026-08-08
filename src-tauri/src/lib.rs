@@ -1,12 +1,17 @@
 #![cfg_attr(target_os = "windows", allow(linker_messages))]
 
+mod async_runtime;
+pub mod admin;
 mod actions;
 mod app_state;
 mod auth;
+#[cfg(feature = "desktop")]
 mod commands;
 mod data;
 mod error;
+pub mod gateway;
 pub mod harness;
+pub mod headless;
 mod health;
 mod mcp;
 mod platform;
@@ -18,19 +23,25 @@ mod tunnel;
 mod update;
 mod workspace;
 
+#[cfg(feature = "desktop")]
 use app_state::AppState;
+#[cfg(feature = "desktop")]
 use commands::{
     check_app_update, create_workspace, delete_frp_profile, delete_workspace,
     get_actions_runtime_status, get_app_settings, get_download_config, get_frp_snippet,
+    clear_gateway_session, get_gateway_config, get_gateway_status,
     get_last_workspace_id, get_proxy, get_runtime_status, get_shared_secret, get_webview_memory_sample,
     get_workspace_secret, install_software, list_frp_profiles, list_software, list_workspaces,
     open_url, open_workspace_directory, read_workspace_logs, recreate_ui_webview,
-    regenerate_shared_secret, regenerate_workspace_secret, restart_actions_runtime, restart_runtime,
-    restart_tunnel, run_health_checks, save_frp_profile, set_download_config, set_last_workspace,
-    set_proxy, set_shared_secret, set_workspace_secret, start_actions_runtime, start_runtime,
-    start_tunnel, stop_actions_runtime, stop_runtime, stop_tunnel, test_tunnel, uninstall_software,
+    regenerate_shared_secret, regenerate_workspace_secret, restart_actions_runtime, restart_gateway,
+    restart_runtime, restart_tunnel, run_health_checks, save_frp_profile, set_download_config,
+    set_gateway_config, set_last_workspace, set_proxy, set_shared_secret, set_workspace_secret,
+    start_actions_runtime, start_gateway, start_runtime,
+    start_tunnel, stop_actions_runtime, stop_gateway, stop_runtime, stop_tunnel, test_tunnel,
+    uninstall_software,
     update_workspace,
 };
+#[cfg(feature = "desktop")]
 use tauri::Manager;
 
 #[cfg(target_os = "windows")]
@@ -63,6 +74,7 @@ fn acquire_single_instance() -> bool {
     true
 }
 
+#[cfg(feature = "desktop")]
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     if !acquire_single_instance() {
@@ -88,6 +100,13 @@ pub fn run() {
             start_runtime,
             stop_runtime,
             get_runtime_status,
+            get_gateway_config,
+            set_gateway_config,
+            start_gateway,
+            stop_gateway,
+            restart_gateway,
+            get_gateway_status,
+            clear_gateway_session,
             start_actions_runtime,
             stop_actions_runtime,
             get_actions_runtime_status,

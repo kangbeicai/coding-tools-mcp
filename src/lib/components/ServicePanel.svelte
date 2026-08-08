@@ -10,6 +10,8 @@
     statusMessage?: string;
     port: number;
     portEditable?: boolean;
+    bindHost?: string;
+    bindHostEditable?: boolean;
     busy?: boolean;
     tunnelType?: string;
     localEndpoint: string;
@@ -17,6 +19,7 @@
     publicLabel?: string;
     onToggle: () => void | Promise<void>;
     onPortChange?: (port: number) => void | Promise<void>;
+    onBindHostChange?: (host: string) => void | Promise<void>;
   }
 
   let {
@@ -26,6 +29,8 @@
     statusMessage = "",
     port,
     portEditable = false,
+    bindHost = "",
+    bindHostEditable = false,
     busy = false,
     tunnelType = "none",
     localEndpoint,
@@ -33,17 +38,21 @@
     publicLabel = "公网",
     onToggle,
     onPortChange,
+    onBindHostChange,
   }: Props = $props();
 
   let draftPort = $state(0);
+  let draftBindHost = $state("");
 
   $effect(() => {
     draftPort = port;
+    draftBindHost = bindHost;
   });
 
   const running = $derived(status === "running");
   const showError = $derived(status === "error" && Boolean(statusMessage));
   const canEditPort = $derived(portEditable && !running && status !== "starting");
+  const canEditBindHost = $derived(bindHostEditable && !running && status !== "starting");
   const tunnelEnabled = $derived(tunnelType === "cloudflare" || tunnelType === "frp");
   const tunnelLabel = $derived(
     tunnelType === "cloudflare" ? "Cloudflare" : tunnelType === "frp" ? "FRP" : "",
@@ -56,6 +65,15 @@
       return;
     }
     await onPortChange(draftPort);
+  }
+
+  async function commitBindHost() {
+    const next = draftBindHost.trim();
+    if (!onBindHostChange || !next || next === bindHost) {
+      draftBindHost = bindHost;
+      return;
+    }
+    await onBindHostChange(next);
   }
 </script>
 
@@ -114,6 +132,30 @@
         {/if}
       </div>
     </div>
+
+    {#if bindHost}
+      <div class="tx-info-block">
+        <div class="tx-info-row">
+          <span class="tx-info-label">监听地址</span>
+          {#if canEditBindHost}
+            <input
+              type="text"
+              class="tx-input tx-input-inline"
+              bind:value={draftBindHost}
+              onchange={commitBindHost}
+              placeholder="127.0.0.1 或 0.0.0.0"
+            />
+          {:else}
+            <span class="tx-mono text-sm">{bindHost}</span>
+          {/if}
+        </div>
+        {#if bindHost === "0.0.0.0"}
+          <p class="mt-1.5 text-xs text-[var(--color-text-muted)]">
+            当前监听所有 IPv4 网卡，可用于局域网访问或路由器端口映射。
+          </p>
+        {/if}
+      </div>
+    {/if}
 
     <div class="tx-info-block">
       <div class="tx-info-row">

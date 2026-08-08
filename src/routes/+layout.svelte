@@ -4,6 +4,7 @@
   import { goto } from "$app/navigation";
   import { page } from "$app/stores";
   import { open } from "@tauri-apps/plugin-dialog";
+  import { isTauriRuntime } from "$lib/api/transport";
   import AppShell from "$lib/components/AppShell.svelte";
   import ToastHost from "$lib/components/ToastHost.svelte";
   import WorkspaceNavItem from "$lib/components/WorkspaceNavItem.svelte";
@@ -20,6 +21,7 @@
   import type { RuntimeState } from "$lib/types";
 
   let { children } = $props();
+  let desktopMode = $state(false);
 
   async function refreshWorkspaces() {
     const items = await listWorkspaces();
@@ -48,11 +50,18 @@
 
   async function addWorkspace() {
     try {
-      const selected = await open({ directory: true, multiple: false });
-      if (!selected || Array.isArray(selected)) return;
+      let selected: string | null = null;
+      if (isTauriRuntime()) {
+        const picked = await open({ directory: true, multiple: false });
+        if (!picked || Array.isArray(picked)) return;
+        selected = picked;
+      } else {
+        selected = window.prompt("请输入服务器上的工作区绝对路径，例如 /home/user/project：")?.trim() || null;
+        if (!selected) return;
+      }
       const profile = await createWorkspace(selected);
       await refreshWorkspaces();
-      goto(`/workspace/${profile.id}`);
+      goto(isTauriRuntime() ? `/workspace/${profile.id}` : `/web/workspace/${profile.id}`);
     } catch (error) {
       showToast(String(error), {
         title: "添加工作区失败",
@@ -63,11 +72,15 @@
   }
 
   function openWorkspace(id: string) {
-    goto(`/workspace/${id}`);
+    goto(isTauriRuntime() ? `/workspace/${id}` : `/web/workspace/${id}`);
   }
 
   function openFrpSettings() {
     goto("/settings/frp");
+  }
+
+  function openGatewaySettings() {
+    goto("/settings/gateway");
   }
 
   function openSoftwareSettings() {
@@ -83,11 +96,16 @@
   }
 
   onMount(() => {
-    const stopGuard = startUiMemoryGuard();
+    desktopMode = isTauriRuntime();
+    const stopGuard = desktopMode ? startUiMemoryGuard() : () => {};
     void (async () => {
       await refreshWorkspaces();
       const path = $page.url.pathname;
       if (path === "/") {
+        if (!desktopMode) {
+          goto("/settings/gateway");
+          return;
+        }
         const lastId = await getLastWorkspaceId();
         if (lastId && $workspaces.some((item) => item.id === lastId)) {
           goto(`/workspace/${lastId}`);
@@ -104,10 +122,10 @@
   {#snippet settingsNav()}
     <button
       type="button"
-      class="tx-settings-link {$page.url.pathname === '/settings/general' ? 'active' : ''}"
-      onclick={openGeneralSettings}
+      class="tx-settings-link {$page.url.pathname === '/settings/gateway' ? 'active' : ''}"
+      onclick={openGatewaySettings}
     >
-      通用
+      Gateway
     </button>
     <button
       type="button"
@@ -116,27 +134,36 @@
     >
       共享密钥
     </button>
-    <button
-      type="button"
-      class="tx-settings-link {$page.url.pathname === '/settings/frp' ? 'active' : ''}"
-      onclick={openFrpSettings}
-    >
-      FRP 配置
-    </button>
-    <button
-      type="button"
-      class="tx-settings-link {$page.url.pathname === '/settings/software' ? 'active' : ''}"
-      onclick={openSoftwareSettings}
-    >
-      软件管理
-    </button>
+    {#if desktopMode}
+      <button
+        type="button"
+        class="tx-settings-link {$page.url.pathname === '/settings/general' ? 'active' : ''}"
+        onclick={openGeneralSettings}
+      >
+        通用
+      </button>
+      <button
+        type="button"
+        class="tx-settings-link {$page.url.pathname === '/settings/frp' ? 'active' : ''}"
+        onclick={openFrpSettings}
+      >
+        FRP 配置
+      </button>
+      <button
+        type="button"
+        class="tx-settings-link {$page.url.pathname === '/settings/software' ? 'active' : ''}"
+        onclick={openSoftwareSettings}
+      >
+        软件管理
+      </button>
+    {/if}
   {/snippet}
   {#snippet sidebar()}
     <div class="space-y-1">
       {#each $workspaces as workspace (workspace.id)}
         <WorkspaceNavItem
           workspace={workspace}
-          active={$page.url.pathname === `/workspace/${workspace.id}`}
+          active={$page.url.pathname === `/workspace/${workspace.id}` || $page.url.pathname === `/web/workspace/${workspace.id}`}
           mcpState={$mcpRuntimeStates[workspace.id] ?? "stopped"}
           actionsState={$actionsRuntimeStates[workspace.id] ?? "stopped"}
           onClick={() => openWorkspace(workspace.id)}

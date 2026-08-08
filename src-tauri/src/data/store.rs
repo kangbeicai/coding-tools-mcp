@@ -194,7 +194,7 @@ impl DataStore {
     }
 
     pub fn regenerate_shared_secret(&mut self, key: &str) -> AppResult<String> {
-        let value = random_secret();
+        let value = shared_value_for_key(key);
         self.set_shared_secret(key, &value)?;
         Ok(value)
     }

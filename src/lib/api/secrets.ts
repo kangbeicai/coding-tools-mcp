@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invokeCommand } from "$lib/api/transport";
 
 export type WorkspaceSecretKey =
   | "oauth_client_secret"
@@ -18,7 +18,7 @@ export async function getWorkspaceSecret(
   id: string,
   key: WorkspaceSecretKey,
 ): Promise<string | null> {
-  return invoke<string | null>("get_workspace_secret", { id, key });
+  return invokeCommand<string | null>("get_workspace_secret", { id, key });
 }
 
 export async function setWorkspaceSecret(
@@ -26,14 +26,14 @@ export async function setWorkspaceSecret(
   key: WorkspaceSecretKey,
   value: string,
 ): Promise<void> {
-  return invoke("set_workspace_secret", { id, key, value });
+  return invokeCommand<void>("set_workspace_secret", { id, key, value });
 }
 
 export async function regenerateWorkspaceSecret(
   id: string,
   key: WorkspaceSecretKey,
 ): Promise<string> {
-  return invoke<string>("regenerate_workspace_secret", { id, key });
+  return invokeCommand<string>("regenerate_workspace_secret", { id, key });
 }
 
 /** @deprecated use WorkspaceSecretKey */
@@ -62,15 +62,15 @@ export type SharedSecretKey =
   | "actions_oauth_token_secret";
 
 export async function getSharedSecret(key: SharedSecretKey): Promise<string | null> {
-  return invoke<string | null>("get_shared_secret", { key });
+  return invokeCommand<string | null>("get_shared_secret", { key });
 }
 
 export async function setSharedSecret(key: SharedSecretKey, value: string): Promise<void> {
-  return invoke("set_shared_secret", { key, value });
+  return invokeCommand<void>("set_shared_secret", { key, value });
 }
 
 export async function regenerateSharedSecret(key: SharedSecretKey): Promise<string> {
-  return invoke<string>("regenerate_shared_secret", { key });
+  return invokeCommand<string>("regenerate_shared_secret", { key });
 }
 
 export async function secretIsSet(id: string, key: WorkspaceSecretKey): Promise<boolean> {

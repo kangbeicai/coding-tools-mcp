@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invokeCommand } from "$lib/api/transport";
 
 export interface FrpProfileDto {
   id: string;
@@ -16,26 +16,26 @@ export interface FrpProfileInput {
 }
 
 export async function listFrpProfiles(): Promise<FrpProfileDto[]> {
-  return invoke<FrpProfileDto[]>("list_frp_profiles");
+  return invokeCommand<FrpProfileDto[]>("list_frp_profiles");
 }
 
 export async function saveFrpProfile(
   profile: FrpProfileInput,
   token?: string,
 ): Promise<FrpProfileDto> {
-  return invoke<FrpProfileDto>("save_frp_profile", { profile, token });
+  return invokeCommand<FrpProfileDto>("save_frp_profile", { profile, token });
 }
 
 export async function getLastWorkspaceId(): Promise<string> {
-  return invoke<string>("get_last_workspace_id");
+  return invokeCommand<string>("get_last_workspace_id");
 }
 
 export async function setLastWorkspace(id: string): Promise<void> {
-  return invoke("set_last_workspace", { id });
+  return invokeCommand<void>("set_last_workspace", { id });
 }
 
 export async function deleteFrpProfile(id: string): Promise<void> {
-  return invoke("delete_frp_profile", { id });
+  return invokeCommand<void>("delete_frp_profile", { id });
 }
 
 export interface ProxyConfigDto {
@@ -44,9 +44,9 @@ export interface ProxyConfigDto {
 }
 
 export async function getProxy(): Promise<ProxyConfigDto> {
-  return invoke<ProxyConfigDto>("get_proxy");
+  return invokeCommand<ProxyConfigDto>("get_proxy");
 }
 
 export async function setProxy(proxy: ProxyConfigDto): Promise<void> {
-  return invoke("set_proxy", { proxy });
+  return invokeCommand<void>("set_proxy", { proxy });
 }

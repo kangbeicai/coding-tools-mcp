@@ -29,7 +29,7 @@ pub fn ensure_frp_health_loop() {
     if FRP_HEALTH_LOOP_STARTED.swap(true, Ordering::SeqCst) {
         return;
     }
-    tauri::async_runtime::spawn(async {
+    crate::async_runtime::spawn(async {
         loop {
             sleep(FRP_HEALTH_INTERVAL).await;
             let settings = AppSettings::load_or_default();

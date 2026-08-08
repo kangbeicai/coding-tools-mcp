@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { message } from "@tauri-apps/plugin-dialog";
   import SecretInput from "$lib/components/SecretInput.svelte";
+  import { showToast } from "$lib/stores/toast";
   import {
     getSharedSecret,
     setSharedSecret,
@@ -68,7 +68,7 @@
       // giving the user visible confirmation before we navigate away.
       // saveAll will write the same value (idempotent) and update originals.
     } catch (e) {
-      await message(String(e), { title: "重新生成失败", kind: "error" });
+      showToast(String(e), { title: "重新生成失败", kind: "error" });
     } finally {
       regenerating = null;
     }
@@ -84,7 +84,7 @@
         }
       }
     } catch (e) {
-      await message(String(e), { title: "保存失败", kind: "error" });
+      showToast(String(e), { title: "保存失败", kind: "error" });
     } finally {
       saving = false;
     }

@@ -1,5 +1,6 @@
 mod app_info;
 mod frp_profiles;
+mod gateway;
 mod health;
 mod logs;
 pub(crate) mod runtime;
@@ -14,6 +15,10 @@ pub use ui_memory::{get_webview_memory_sample, recreate_ui_webview};
 pub use frp_profiles::{
     delete_frp_profile, get_app_settings, get_last_workspace_id, get_proxy, list_frp_profiles,
     save_frp_profile, set_last_workspace, set_proxy,
+};
+pub use gateway::{
+    clear_gateway_session, get_gateway_config, get_gateway_status, restart_gateway,
+    set_gateway_config, start_gateway, stop_gateway,
 };
 pub use health::run_health_checks;
 pub use logs::read_workspace_logs;

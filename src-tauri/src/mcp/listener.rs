@@ -48,7 +48,7 @@ pub fn spawn_listener(
     oauth_password: Option<String>,
     oauth_token_secret: Option<String>,
     runtime: RuntimeConfig,
-) -> Result<(ShutdownSender, tauri::async_runtime::JoinHandle<()>), String> {
+) -> Result<(ShutdownSender, crate::async_runtime::JoinHandle<()>), String> {
     let workspace_display = workspace_path.display().to_string();
     let workspace = Workspace::new(workspace_path).map_err(|e| e.message())?;
     let policy = PolicySettings::from_runtime(&runtime);
@@ -88,6 +88,7 @@ pub fn spawn_listener(
     } else {
         None
     };
+    let bind_host = runtime.bind_host.trim().to_string();
     let state = ListenerState {
         mcp,
         auth,
@@ -100,11 +101,11 @@ pub fn spawn_listener(
         oauth_client_secret,
     };
     // 在返回 Running 之前完成 bind，避免后台任务里的端口冲突被伪装成启动成功。
-    let listener = bind_listener(port)?;
+    let listener = bind_listener(&bind_host, port)?;
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
     let profile_id = state.workspace_id.clone();
-    let handle = tauri::async_runtime::spawn(async move {
-        let result = serve(listener, port, state, shutdown_rx).await;
+    let handle = crate::async_runtime::spawn(async move {
+        let result = serve(listener, &bind_host, port, state, shutdown_rx).await;
         if let Err(err) = &result {
             append_profile_log(
                 &profile_id,
@@ -121,6 +122,7 @@ pub fn spawn_listener(
 
 async fn serve(
     listener: tokio::net::TcpListener,
+    bind_host: &str,
     port: u16,
     state: ListenerState,
     shutdown: oneshot::Receiver<()>,
@@ -144,7 +146,7 @@ async fn serve(
     append_profile_log(
         &profile_id,
         "stdout.log",
-        &format!("[mcp] listening on http://127.0.0.1:{port}/mcp"),
+        &format!("[mcp] listening on http://{bind_host}:{port}/mcp"),
     );
     axum::serve(listener, app)
         .with_graceful_shutdown(async {
@@ -154,10 +156,13 @@ async fn serve(
     Ok(())
 }
 
-fn bind_listener(port: u16) -> Result<tokio::net::TcpListener, String> {
-    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+fn bind_listener(bind_host: &str, port: u16) -> Result<tokio::net::TcpListener, String> {
+    let ip = bind_host
+        .parse::<std::net::IpAddr>()
+        .map_err(|_| format!("MCP 监听地址无效: {bind_host}"))?;
+    let addr = std::net::SocketAddr::new(ip, port);
     let listener = std::net::TcpListener::bind(addr)
-        .map_err(|err| format!("MCP 本地端口 {port} 绑定失败: {err}"))?;
+        .map_err(|err| format!("MCP 地址 {bind_host}:{port} 绑定失败: {err}"))?;
     listener
         .set_nonblocking(true)
         .map_err(|err| format!("MCP 本地端口 {port} 设置非阻塞失败: {err}"))?;
@@ -384,7 +389,15 @@ mod tests {
         let occupied = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("占用测试端口");
         let port = occupied.local_addr().expect("读取测试端口").port();
 
-        assert!(bind_listener(port).is_err());
+        assert!(bind_listener("127.0.0.1", port).is_err());
+    }
+
+    #[test]
+    fn bind_listener_accepts_all_ipv4_interfaces() {
+        let listener = bind_listener("0.0.0.0", 0).expect("监听所有 IPv4 网卡");
+        let addr = listener.local_addr().expect("读取监听地址");
+
+        assert!(addr.ip().is_unspecified());
     }
 
     #[tokio::test]

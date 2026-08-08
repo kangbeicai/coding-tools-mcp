@@ -49,6 +49,8 @@ pub struct AuthConfig {
 pub struct RuntimeConfig {
     #[serde(default = "default_mcp_port")]
     pub local_port: u16,
+    #[serde(default = "default_bind_host")]
+    pub bind_host: String,
     #[serde(default = "default_tool_profile")]
     pub tool_profile: String,
     #[serde(default = "default_permission_mode")]
@@ -154,6 +156,10 @@ fn default_mcp_port() -> u16 {
     28766
 }
 
+fn default_bind_host() -> String {
+    "127.0.0.1".to_string()
+}
+
 fn default_actions_port() -> u16 {
     8787
 }
@@ -211,6 +217,7 @@ impl Default for RuntimeConfig {
     fn default() -> Self {
         Self {
             local_port: default_mcp_port(),
+            bind_host: default_bind_host(),
             tool_profile: default_tool_profile(),
             permission_mode: default_permission_mode(),
             runtime_command: String::new(),
