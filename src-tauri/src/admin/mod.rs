@@ -7,4 +7,16 @@
 mod listener;
 mod rpc;
 
+mod embedded_web {
+    include!(concat!(env!("OUT_DIR"), "/embedded_web.rs"));
+}
+
 pub use listener::{spawn_admin_listener, AdminProcess};
+
+pub(crate) fn embedded_web_asset(path: &str) -> Option<&'static [u8]> {
+    embedded_web::embedded_web_asset(path)
+}
+
+pub(crate) fn embedded_web_asset_count() -> usize {
+    embedded_web::EMBEDDED_WEB_ASSET_COUNT
+}

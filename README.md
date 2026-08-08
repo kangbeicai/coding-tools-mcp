@@ -60,7 +60,9 @@ macOS 安装包目前未签名。如果系统阻止首次打开，请在“系�
 
 #### Linux 无桌面 / Web 模式
 
-Linux 服务器可以只构建 `coding-tools`，不启用 Tauri/WebKit/GTK runtime。Web Console 使用同一套 Svelte 静态构建：
+Linux 服务器可以只构建 `coding-tools`，不启用 Tauri/WebKit/GTK runtime。推荐把它当成类似 OpenCode/Pi 的前台 CLI：需要时手动启动，`Ctrl+C` 后完整退出，不要求 Docker、systemd 或 root 权限。
+
+Web Console 会在 headless release 构建时直接嵌入 `coding-tools` binary：
 
 ```bash
 npm ci
@@ -73,7 +75,10 @@ cargo build --release --no-default-features --features headless --bin coding-too
 常用入口：
 
 ```bash
-# 推荐：同时运行 MCP Gateway 和本地 Web Admin
+# 推荐：一条命令前台运行 Gateway + Web Console + 已配置的 managed exposure
+./target/release/coding-tools
+
+# 显式写法，行为与上面一致
 ./target/release/coding-tools serve
 
 # 可选：轻量终端监视器；Web Console 仍然同时运行
@@ -90,10 +95,12 @@ cargo build --release --no-default-features --features headless --bin coding-too
 也可以在启动时覆盖并保存网络设置，例如：
 
 ```bash
-coding-tools serve --bind 0.0.0.0 --port 28766 \
+coding-tools --bind 0.0.0.0 --port 28766 \
   --public-url https://mcp.example.com --auth oauth \
-  --admin-port 28767 --web-root ../build
+  --admin-port 28767
 ```
+
+`--web-root` 仍保留给开发调试或自定义 Web bundle；正常 release 运行不再依赖旁边存在 `build/` 目录。因此正式分发可以只提供一个 `coding-tools` 可执行文件。
 
 启动后默认有两个彼此独立的监听面：
 
@@ -110,9 +117,11 @@ ssh -L 28767:127.0.0.1:28767 user@server
 
 然后在本机浏览器打开 `http://127.0.0.1:28767`。在独立管理员认证完成前，不建议也不允许直接把 Admin API 暴露到局域网/公网。
 
-#### 作为 systemd 用户服务长期运行
+#### 可选：作为 systemd 用户服务长期运行
 
-完成 release binary 和 Web build 后，可以直接安装为当前 Linux 用户的 systemd service：
+systemd 能力仍保留给确实需要无人值守自启动的场景，但**不是推荐的默认运行方式**。日常开发/个人服务器优先直接运行 `coding-tools`，需要时开启、完成后 `Ctrl+C` 退出。
+
+如需长期托管，可以安装为当前 Linux 用户的 systemd service：
 
 ```bash
 cd src-tauri
@@ -166,7 +175,7 @@ sudo loginctl enable-linger "$USER"
 
 ### 3. 启动全局 Gateway
 
-在“设置 → Gateway”中配置并启动全局 MCP Gateway：
+第一次运行 `coding-tools` 后，在“设置 → Gateway”中配置全局 MCP Gateway。之后每次手动运行 `coding-tools` 都会读取持久化配置并自动启动 Gateway；若 Public Access 为 Managed FRP/Cloudflare，也会自动恢复对应 exposure：
 
 - 默认监听 `127.0.0.1:28766`，只允许本机访问；
 - 需要局域网访问或路由器端口映射时，把监听地址改为 `0.0.0.0` 或指定网卡 IP；
@@ -175,6 +184,22 @@ sudo loginctl enable-linger "$USER"
 - Gateway 使用共享 OAuth/Bearer 凭据，一个 ChatGPT 插件即可访问所有已注册工作区；
 - 当注册了两个及以上工作区时，项目工具在执行前必须先通过 `select_workspace` 绑定当前会话；
 - `/w/<workspace-id>/mcp` 是显式路径路由，主要用于调试或其他 MCP 客户端，并不要求在 ChatGPT 中分别创建插件。
+
+标准手动生命周期为：
+
+```text
+coding-tools
+    ↓
+Web Admin + Gateway
+    ↓
+Managed FRP / Cloudflare（若已配置）
+    ↓
+前台运行
+    ↓
+Ctrl+C
+    ↓
+停止 managed exposure → Gateway → Admin → 退出
+```
 
 > 旧的“每个工作区独立启动 MCP + 独立公网地址”仍保留为兼容模式。推荐新部署优先使用全局 Gateway；同一端口不能同时被全局 Gateway 和旧工作区 listener 占用。
 

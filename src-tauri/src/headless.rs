@@ -1,7 +1,6 @@
 //! Linux/server-oriented entry points that do not require Tauri, WebKit or a
-//! graphical session. `serve` is the primary deployment mode; the Web Admin
-//! console is served locally and can be reached remotely through SSH port
-//! forwarding.
+//! graphical session. Running `coding-tools` with no subcommand starts the
+//! foreground Gateway + Web Console, similar to other developer CLIs.
 
 mod systemd;
 
@@ -20,7 +19,8 @@ use crate::settings::{AdminConfig, GatewayConfig};
 pub fn run_from_env() -> Result<(), String> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
-        None | Some("help") | Some("--help") | Some("-h") => {
+        None => run_server(false, &[]),
+        Some("help") | Some("--help") | Some("-h") => {
             print_help();
             Ok(())
         }
@@ -32,6 +32,7 @@ pub fn run_from_env() -> Result<(), String> {
         Some("install-service") => service_install_command(&args[1..]),
         Some("uninstall-service") => service_uninstall_command(&args[1..]),
         Some("health") => health_command(&args[1..]),
+        Some(option) if option.starts_with('-') => run_server(false, &args),
         Some(other) => Err(format!(
             "未知命令: {other}\n运行 `coding-tools --help` 查看用法"
         )),
@@ -269,7 +270,8 @@ fn run_server(tui: bool, args: &[String]) -> Result<(), String> {
     if tui {
         run_terminal_ui(app, admin)
     } else {
-        println!("Coding Tools server running");
+        println!("Coding Tools");
+        println!("  Mode        : foreground (Ctrl+C to stop)");
         match gateway_start {
             Ok(gateway) => {
                 println!("  MCP Gateway: {}", gateway.local_endpoint);
@@ -303,6 +305,7 @@ fn run_server(tui: bool, args: &[String]) -> Result<(), String> {
             }
         }
         println!("  Web Admin  : {}", admin.local_endpoint);
+        println!("  Web Console: {}", admin.web_source);
         println!();
         println!("Remote Linux admin (recommended):");
         println!("  ssh -L {admin_port}:127.0.0.1:{admin_port} user@server");
@@ -374,9 +377,10 @@ fn run_terminal_ui(app: Arc<AppState>, admin: AdminProcess) -> Result<(), String
 }
 
 fn shutdown(app: Arc<AppState>, admin: AdminProcess) -> Result<(), String> {
+    let gateway_result = crate::async_runtime::block_on(stop_gateway_service(&app));
     let _ = admin.shutdown.send(());
     let _ = crate::async_runtime::block_on(admin.handle);
-    crate::async_runtime::block_on(stop_gateway_service(&app))
+    gateway_result
         .map(|_| ())
         .map_err(|error| error.to_string())
 }
@@ -557,27 +561,28 @@ fn redact_session(value: &str) -> String {
 fn print_help() {
     println!("Coding Tools Gateway + Web Console\n");
     println!("Usage:");
+    println!("  coding-tools                         # recommended: foreground Gateway + Web Console");
     println!("  coding-tools serve [gateway/admin overrides]");
     println!("  coding-tools tui   [gateway/admin overrides]  # optional terminal monitor");
     println!("  coding-tools workspace list");
     println!("  coding-tools config show");
     println!("  coding-tools health [--json]");
-    println!("  coding-tools service install [--web-root PATH] [--dry-run] [--no-start]");
-    println!("  coding-tools service status");
-    println!("  coding-tools service uninstall [--keep-bundle] [--dry-run]");
-    println!("  coding-tools install-service ...        # alias");
-    println!("  coding-tools uninstall-service ...      # alias");
     println!();
     println!("Overrides:");
     println!("  --bind IP --port PORT --public-url URL --auth oauth|bearer|noauth");
-    println!("  --admin-bind 127.0.0.1 --admin-port 28767 --web-root ./build");
+    println!("  --admin-bind 127.0.0.1 --admin-port 28767 [--web-root ./build]");
+    println!("  Overrides can be passed directly, e.g. `coding-tools --port 28766`.");
     println!();
     println!("Linux headless build:");
     println!("  npm ci && npm run build");
     println!(
         "  cargo build --release --no-default-features --features headless --bin coding-tools"
     );
+    println!("  The Web Console built above is embedded into the headless binary.");
     println!();
     println!("Remote admin:");
     println!("  ssh -L 28767:127.0.0.1:28767 user@server");
+    println!();
+    println!("Advanced optional service mode:");
+    println!("  coding-tools service install|status|uninstall");
 }

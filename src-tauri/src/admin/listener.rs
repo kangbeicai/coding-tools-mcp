@@ -9,6 +9,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use tokio::sync::oneshot;
 
+use crate::admin::{embedded_web_asset, embedded_web_asset_count};
 use crate::admin::rpc::{dispatch, failure, success, RpcRequest};
 use crate::app_state::AppState;
 use crate::settings::AdminConfig;
@@ -23,6 +24,7 @@ pub struct AdminProcess {
     pub shutdown: oneshot::Sender<()>,
     pub handle: crate::async_runtime::JoinHandle<()>,
     pub local_endpoint: String,
+    pub web_source: String,
 }
 
 pub fn spawn_admin_listener(
@@ -40,6 +42,15 @@ pub fn spawn_admin_listener(
     listener
         .set_nonblocking(true)
         .map_err(|error| format!("Admin 监听器设置非阻塞失败: {error}"))?;
+    let filesystem_web = web_root.join("index.html").is_file();
+    let embedded_count = embedded_web_asset_count();
+    let web_source = if filesystem_web {
+        format!("filesystem ({})", web_root.display())
+    } else if embedded_count > 0 {
+        format!("embedded ({embedded_count} assets)")
+    } else {
+        "unavailable".into()
+    };
     let state = AdminState { app, web_root };
     let endpoint = format!("http://127.0.0.1:{}", config.local_port);
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
@@ -70,6 +81,7 @@ pub fn spawn_admin_listener(
         shutdown: shutdown_tx,
         handle,
         local_endpoint: endpoint,
+        web_source,
     })
 }
 
@@ -104,16 +116,31 @@ async fn static_file(State(state): State<AdminState>, OriginalUri(uri): Original
         return bytes_response(bytes, content_type(&requested));
     }
 
+    if let Some(bytes) = embedded_web_asset(&relative_path(&requested, &state.web_root)) {
+        return bytes_response(bytes.to_vec(), content_type(&requested));
+    }
+
     // SPA fallback for SvelteKit routes such as /settings/gateway.
     let index = state.web_root.join("index.html");
     match tokio::fs::read(&index).await {
         Ok(bytes) => bytes_response(bytes, "text/html; charset=utf-8"),
-        Err(_) => (
-            StatusCode::SERVICE_UNAVAILABLE,
-            "Web UI 尚未构建。先在项目根目录运行 `npm run build`，或使用 --web-root 指向构建目录。",
-        )
-            .into_response(),
+        Err(_) => embedded_web_asset("index.html")
+            .map(|bytes| bytes_response(bytes.to_vec(), "text/html; charset=utf-8"))
+            .unwrap_or_else(|| {
+                (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "Web UI 不可用。开发构建请先运行 `npm run build` 再构建 coding-tools；也可以使用 --web-root 指向外部构建目录。",
+                )
+                    .into_response()
+            }),
     }
+}
+
+fn relative_path(path: &std::path::Path, root: &std::path::Path) -> String {
+    path.strip_prefix(root)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/")
 }
 
 fn safe_relative_path(value: &str) -> Option<PathBuf> {

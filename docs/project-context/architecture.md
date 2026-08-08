@@ -111,9 +111,22 @@ MCP Gateway   127.0.0.1:28766/mcp   （可改监听地址）
 Web Admin     127.0.0.1:28767/       （当前强制 loopback）
 ```
 
-Linux 无图形环境不需要 Tauri、WebKit 或 GTK runtime。SvelteKit 使用 `adapter-static` 构建到 `build/`，由 Rust Admin Server 直接提供静态文件。
+Linux 无图形环境不需要 Tauri、WebKit 或 GTK runtime。产品的首选运行模式是 CLI-first/manual-run：用户像启动 OpenCode/Pi 一样手动运行 `coding-tools`，进程在前台托管 Web Admin、Global Gateway 和可选 managed exposure，`Ctrl+C` 后完整退出。
 
-正式服务器部署可由 headless binary 自行安装 user-level systemd service：
+SvelteKit 仍使用 `adapter-static` 构建到 `build/`，但 headless release 构建会把这套静态资源嵌入 `coding-tools` binary。Admin Server 优先使用显式/开发态 filesystem Web root，找不到时回退到 embedded assets，因此正式 Linux 分发可以只有一个可执行文件。
+
+```text
+coding-tools
+    │
+    ├── Web Admin      127.0.0.1:28767
+    ├── Global Gateway 127.0.0.1:28766/mcp
+    └── Managed Exposure（可选 FRP/Cloudflare）
+
+Ctrl+C
+    └── graceful shutdown → process exits
+```
+
+对于确实需要无人值守/开机自启动的服务器，headless binary 仍保留 user-level systemd service 作为高级兼容部署方式，但它不再是默认产品路线：
 
 ```text
 coding-tools install-service
@@ -281,7 +294,7 @@ Public Access:
 - `local/direct/external` 是被动模式，不创建子进程。
 - `frp/cloudflare` 是 managed 模式，有独立于 Gateway listener 的 start/stop 生命周期。
 - 停止 Gateway 会先停止 managed exposure，避免留下指向已关闭后端的公网进程。
-- headless `coding-tools serve` 在持久化模式为 `frp/cloudflare` 时会在 Gateway 成功启动后恢复 managed exposure，适合 systemd 重启恢复。
+- headless `coding-tools` / `coding-tools serve` 在持久化模式为 `frp/cloudflare` 时会在 Gateway 成功启动后恢复 managed exposure；正常使用由用户手动启动进程，systemd 只是可选托管层。
 - Managed FRP/Cloudflare 从本机 `127.0.0.1:<gateway-port>` 回连，因此 Gateway 必须监听 loopback 或 wildcard 地址；仅绑定某个非 loopback 网卡地址时拒绝启动 managed exposure。
 - FRP 和 Cloudflare Named 模式面向 ChatGPT 时要求显式 HTTPS canonical URL。
 - Cloudflare Quick 可以没有 canonical URL，但生成地址只进入运行状态，不持久化为 Gateway identity。
