@@ -113,7 +113,9 @@ pub struct AuthorizeParams {
     pub response_type: String,
     pub client_id: String,
     pub redirect_uri: String,
+    #[serde(default)]
     pub code_challenge: String,
+    #[serde(default)]
     pub code_challenge_method: String,
     #[serde(default)]
     pub state: String,
@@ -123,7 +125,9 @@ pub struct AuthorizeParams {
 pub struct AuthorizeForm {
     pub client_id: String,
     pub redirect_uri: String,
+    #[serde(default)]
     pub code_challenge: String,
+    #[serde(default)]
     pub code_challenge_method: String,
     #[serde(default)]
     pub state: String,
@@ -135,7 +139,9 @@ pub struct TokenForm {
     pub grant_type: String,
     pub code: String,
     pub redirect_uri: String,
+    #[serde(default)]
     pub code_verifier: String,
+    #[serde(default)]
     pub client_id: String,
     #[serde(default)]
     pub client_secret: String,
@@ -152,9 +158,9 @@ pub fn authorize_get(
     if !oauth.client_id_allowed(&params.client_id) {
         return html_error("Unknown client_id", StatusCode::BAD_REQUEST);
     }
-    if params.code_challenge_method != "S256" || params.code_challenge.is_empty() {
+    if !valid_authorize_pkce(oauth, &params.code_challenge, &params.code_challenge_method) {
         return html_error(
-            "code_challenge_method must be S256 and code_challenge is required",
+            "PKCE parameters are invalid, or PKCE is required for clients without a client_secret",
             StatusCode::BAD_REQUEST,
         );
     }
@@ -183,14 +189,14 @@ pub fn authorize_post(oauth: &OAuthRuntime, form: AuthorizeForm, server_url: &st
         ))
         .into_response();
     }
-    if form.code_challenge_method != "S256" || form.code_challenge.is_empty() {
+    if !valid_authorize_pkce(oauth, &form.code_challenge, &form.code_challenge_method) {
         return Html(login_page(
             &form.client_id,
             &form.redirect_uri,
             &form.code_challenge,
             &form.code_challenge_method,
             &form.state,
-            "Invalid PKCE parameters",
+            "Invalid PKCE parameters, or PKCE is required for clients without a client_secret",
             None,
         ))
         .into_response();
@@ -270,10 +276,6 @@ pub fn token_exchange(
     if form.code.is_empty() {
         return token_error("invalid_grant", "code is required");
     }
-    if !valid_code_verifier(&form.code_verifier) {
-        return token_error("invalid_grant", "Invalid code_verifier");
-    }
-
     let code_data = {
         let mut pending = oauth.pending.lock().expect("oauth pending lock");
         pending.remove(&form.code)
@@ -290,8 +292,13 @@ pub fn token_exchange(
     if !constant_time_eq_str(&code_data.redirect_uri, &form.redirect_uri) {
         return token_error("invalid_grant", "redirect_uri mismatch");
     }
-    if !verify_pkce(&form.code_verifier, &code_data.code_challenge) {
-        return token_error("invalid_grant", "PKCE verification failed");
+    if !code_data.code_challenge.is_empty() {
+        if !valid_code_verifier(&form.code_verifier) {
+            return token_error("invalid_grant", "Invalid code_verifier");
+        }
+        if !verify_pkce(&form.code_verifier, &code_data.code_challenge) {
+            return token_error("invalid_grant", "PKCE verification failed");
+        }
     }
 
     let issuer = if code_data.server_url.trim().is_empty() {
@@ -311,6 +318,24 @@ pub fn token_exchange(
             .into_response(),
         Err(_) => token_error("server_error", "Failed to issue access token"),
     }
+}
+
+fn valid_authorize_pkce(oauth: &OAuthRuntime, code_challenge: &str, method: &str) -> bool {
+    let has_challenge = !code_challenge.is_empty();
+    let has_method = !method.is_empty();
+
+    if has_challenge || has_method {
+        return has_challenge && method == "S256";
+    }
+
+    // ChatGPT manual OAuth currently uses a confidential client flow and may
+    // omit PKCE parameters on /oauth/authorize. Only allow that mode when the
+    // server has a client_secret configured; /oauth/token will then require
+    // and verify that secret before issuing a token.
+    oauth
+        .client_secret
+        .as_deref()
+        .is_some_and(|secret| !secret.is_empty())
 }
 
 fn create_access_token(server_url: &str, token_secret: &str, ttl: i64) -> Result<String, ()> {
@@ -496,6 +521,91 @@ mod tests {
             "https://lb.example.com",
         );
         assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[test]
+    fn confidential_client_round_trip_without_pkce() {
+        use axum::http::HeaderMap;
+
+        let oauth = OAuthRuntime::new(
+            "https://lb.example.com".into(),
+            "chatgpt-client-test".into(),
+            Some("client-secret".into()),
+            "test-password".into(),
+            "token-signing-secret".into(),
+        );
+        let redirect_uri = "https://chatgpt.com/connector/oauth/test";
+
+        let authorize = authorize_get(
+            &oauth,
+            AuthorizeParams {
+                response_type: "code".into(),
+                client_id: "chatgpt-client-test".into(),
+                redirect_uri: redirect_uri.into(),
+                code_challenge: String::new(),
+                code_challenge_method: String::new(),
+                state: "state".into(),
+            },
+            None,
+        );
+        assert_eq!(authorize.status(), StatusCode::OK);
+
+        let redirect = authorize_post(
+            &oauth,
+            AuthorizeForm {
+                client_id: "chatgpt-client-test".into(),
+                redirect_uri: redirect_uri.into(),
+                code_challenge: String::new(),
+                code_challenge_method: String::new(),
+                state: "state".into(),
+                password: "test-password".into(),
+            },
+            "https://lb.example.com",
+        );
+        assert_eq!(redirect.status(), StatusCode::SEE_OTHER);
+        let code = {
+            let pending = oauth.pending.lock().expect("lock");
+            pending.keys().next().cloned().unwrap()
+        };
+
+        let response = token_exchange(
+            &oauth,
+            &HeaderMap::new(),
+            TokenForm {
+                grant_type: "authorization_code".into(),
+                code,
+                redirect_uri: redirect_uri.into(),
+                code_verifier: String::new(),
+                client_id: "chatgpt-client-test".into(),
+                client_secret: "client-secret".into(),
+            },
+            "https://lb.example.com",
+        );
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[test]
+    fn public_client_without_pkce_is_rejected() {
+        let oauth = OAuthRuntime::new(
+            "https://lb.example.com".into(),
+            "chatgpt-client-test".into(),
+            None,
+            "test-password".into(),
+            "token-signing-secret".into(),
+        );
+        let response = authorize_get(
+            &oauth,
+            AuthorizeParams {
+                response_type: "code".into(),
+                client_id: "chatgpt-client-test".into(),
+                redirect_uri: "https://chatgpt.com/connector/oauth/test".into(),
+                code_challenge: String::new(),
+                code_challenge_method: String::new(),
+                state: String::new(),
+            },
+            None,
+        );
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 
     #[test]
