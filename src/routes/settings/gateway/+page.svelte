@@ -8,6 +8,7 @@
     getGatewayExposure,
     getGatewayExposureStatus,
     getGatewayStatus,
+    runGatewayHealthChecks,
     clearGatewaySession,
     setGatewayConfig,
     setGatewayExposure,
@@ -18,6 +19,7 @@
     type GatewayConfig,
     type GatewayExposureConfig,
     type GatewayExposureStatus,
+    type GatewayHealthReport,
     type GatewayStatus,
   } from "$lib/api/gateway";
   import { getSharedSecret, setSharedSecret } from "$lib/api/secrets";
@@ -34,6 +36,8 @@
   let busy = $state(false);
   let exposureBusy = $state(false);
   let saving = $state(false);
+  let healthBusy = $state(false);
+  let health = $state<GatewayHealthReport | null>(null);
 
   const running = $derived(status?.state === "running");
   const exposureRunning = $derived(exposureStatus?.state === "running");
@@ -72,6 +76,27 @@
     } catch (error) {
       showToast(String(error), { title: "读取 Gateway 失败", kind: "error" });
     }
+  }
+
+  async function checkHealth() {
+    if (healthBusy) return;
+    healthBusy = true;
+    try {
+      health = await runGatewayHealthChecks();
+      status = await getGatewayStatus();
+      exposureStatus = await getGatewayExposureStatus();
+    } catch (error) {
+      showToast(String(error), { title: "Gateway 健康检查失败", kind: "error" });
+    } finally {
+      healthBusy = false;
+    }
+  }
+
+  function healthBadge(status: string): string {
+    if (status === "ok") return "PASS";
+    if (status === "warn") return "WARN";
+    if (status === "skip") return "SKIP";
+    return "FAIL";
   }
 
   async function toggleExposure() {
@@ -380,6 +405,48 @@
       </div>
     </section>
   {/if}
+
+  <section class="tx-card p-5">
+    <div class="flex flex-wrap items-start justify-between gap-4">
+      <div>
+        <h2 class="text-[15px] font-semibold">Gateway 健康检查</h2>
+        <p class="mt-1 max-w-3xl text-sm text-[var(--color-text-muted)]">
+          从配置、本地 listener、Public Access provider、公网 /mcp 到 OAuth metadata 逐层验证，最后判断是否达到 ChatGPT-ready。
+        </p>
+      </div>
+      <button type="button" class="tx-btn-primary" disabled={healthBusy} onclick={checkHealth}>
+        {healthBusy ? "检查中…" : "运行健康检查"}
+      </button>
+    </div>
+
+    {#if health}
+      <div class="mt-4 tx-info-block">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <span class="font-medium">{health.chatgptReady ? "ChatGPT-ready" : "Not ready"}</span>
+          {#if health.publicBaseUrl}
+            <span class="tx-mono text-xs text-[var(--color-text-muted)]">{health.publicBaseUrl}</span>
+          {/if}
+        </div>
+        <p class="mt-1 text-sm text-[var(--color-text-secondary)]">{health.summary}</p>
+      </div>
+
+      <div class="mt-4 grid gap-2">
+        {#each health.items as item (item.key)}
+          <div class="tx-info-block">
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="tx-mono text-xs">{healthBadge(item.status)}</span>
+              <span class="text-xs uppercase text-[var(--color-text-muted)]">{item.layer}</span>
+              <span class="text-sm font-medium">{item.label}</span>
+            </div>
+            <p class="mt-1 break-all text-sm text-[var(--color-text-secondary)]">{item.detail}</p>
+            {#if item.hint}
+              <p class="mt-1 text-xs text-[var(--color-text-muted)]">建议：{item.hint}</p>
+            {/if}
+          </div>
+        {/each}
+      </div>
+    {/if}
+  </section>
 
   {#if status?.sessions?.length}
     <section class="tx-card p-5">

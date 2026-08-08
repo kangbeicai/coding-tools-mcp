@@ -18,7 +18,7 @@ pub use frp_profiles::{
 };
 pub use gateway::{
     clear_gateway_session, get_gateway_config, get_gateway_exposure, get_gateway_exposure_status,
-    get_gateway_status, restart_gateway, set_gateway_config, set_gateway_exposure,
+    get_gateway_status, restart_gateway, run_gateway_health_checks, set_gateway_config, set_gateway_exposure,
     start_gateway, start_gateway_exposure, stop_gateway, stop_gateway_exposure,
 };
 pub use health::run_health_checks;

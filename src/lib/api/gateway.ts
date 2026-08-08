@@ -9,6 +9,22 @@ export interface GatewayConfig {
   autoSelectSingleWorkspace: boolean;
 }
 
+export interface GatewayHealthItem {
+  key: string;
+  layer: string;
+  label: string;
+  status: "ok" | "warn" | "fail" | "skip" | string;
+  detail: string;
+  hint: string;
+}
+
+export interface GatewayHealthReport {
+  chatgptReady: boolean;
+  summary: string;
+  publicBaseUrl: string;
+  items: GatewayHealthItem[];
+}
+
 export function getGatewayExposure(): Promise<GatewayExposureConfig> {
   return invokeCommand<GatewayExposureConfig>("get_gateway_exposure");
 }
@@ -75,6 +91,10 @@ export function setGatewayConfig(gateway: GatewayConfig): Promise<void> {
 
 export function getGatewayStatus(): Promise<GatewayStatus> {
   return invokeCommand<GatewayStatus>("get_gateway_status");
+}
+
+export function runGatewayHealthChecks(): Promise<GatewayHealthReport> {
+  return invokeCommand<GatewayHealthReport>("run_gateway_health_checks");
 }
 
 export function startGateway(): Promise<GatewayStatus> {

@@ -9,6 +9,7 @@ use crate::gateway::{
     start_gateway_exposure_service, start_gateway_service, stop_gateway_exposure_service,
     stop_gateway_service,
 };
+use crate::health::run_gateway_health_checks;
 use crate::workspace::resources::{assign_free_workspace_ports, validate_workspace_resources_update};
 use crate::workspace::WorkspaceProfile;
 use crate::tunnel::drop_workspace as drop_tunnel_workspace;
@@ -161,6 +162,7 @@ async fn dispatch_inner(state: &AppState, request: RpcRequest) -> AppResult<Valu
         "start_gateway_exposure" => serde_value(start_gateway_exposure_service(state).await?),
         "stop_gateway_exposure" => serde_value(stop_gateway_exposure_service(state).await?),
         "get_gateway_status" => serde_value(gateway_status(state)?),
+        "run_gateway_health_checks" => serde_value(run_gateway_health_checks(state).await?),
         "clear_gateway_session" => {
             let session_key = arg_str(&request.args, "sessionKey")?;
             let removed = state.with_gateway(|process| {

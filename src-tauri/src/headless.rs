@@ -3,6 +3,8 @@
 //! console is served locally and can be reached remotely through SSH port
 //! forwarding.
 
+mod systemd;
+
 use std::io::{self, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -26,7 +28,187 @@ pub fn run_from_env() -> Result<(), String> {
         Some("tui") => run_server(true, &args[1..]),
         Some("workspace") => workspace_command(&args[1..]),
         Some("config") => config_command(&args[1..]),
+        Some("service") => service_command(&args[1..]),
+        Some("install-service") => service_install_command(&args[1..]),
+        Some("uninstall-service") => service_uninstall_command(&args[1..]),
+        Some("health") => health_command(&args[1..]),
         Some(other) => Err(format!("未知命令: {other}\n运行 `coding-tools --help` 查看用法")),
+    }
+}
+
+async fn health_via_admin(admin: &AdminConfig) -> Result<crate::health::GatewayHealthReport, String> {
+    let host = match admin.bind_host.trim().parse::<std::net::IpAddr>() {
+        Ok(std::net::IpAddr::V6(ip)) => format!("[{ip}]"),
+        Ok(std::net::IpAddr::V4(ip)) if ip.is_unspecified() => "127.0.0.1".into(),
+        Ok(std::net::IpAddr::V4(ip)) => ip.to_string(),
+        Err(_) => "127.0.0.1".into(),
+    };
+    let url = format!("http://{host}:{}/api/rpc", admin.local_port);
+    let response = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(8))
+        .build()
+        .map_err(|error| error.to_string())?
+        .post(url)
+        .json(&serde_json::json!({
+            "command": "run_gateway_health_checks",
+            "args": {}
+        }))
+        .send()
+        .await
+        .map_err(|error| error.to_string())?;
+    let payload = response
+        .json::<serde_json::Value>()
+        .await
+        .map_err(|error| error.to_string())?;
+    if payload.get("ok").and_then(serde_json::Value::as_bool) != Some(true) {
+        return Err(payload
+            .get("error")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("Admin health RPC failed")
+            .to_string());
+    }
+    serde_json::from_value(
+        payload
+            .get("result")
+            .cloned()
+            .ok_or("Admin health RPC missing result")?,
+    )
+    .map_err(|error| error.to_string())
+}
+
+fn service_command(args: &[String]) -> Result<(), String> {
+    match args.first().map(String::as_str) {
+        Some("install") => service_install_command(&args[1..]),
+        Some("uninstall") => service_uninstall_command(&args[1..]),
+        Some("status") | None => service_status_command(),
+        Some(other) => Err(format!("未知 service 子命令: {other}")),
+    }
+}
+
+fn service_install_command(args: &[String]) -> Result<(), String> {
+    let mut web_root = default_web_root();
+    let mut dry_run = false;
+    let mut start = true;
+    let mut index = 0usize;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--web-root" => {
+                let value = args.get(index + 1).ok_or("--web-root 缺少值")?;
+                web_root = PathBuf::from(value);
+                index += 2;
+            }
+            "--dry-run" => {
+                dry_run = true;
+                index += 1;
+            }
+            "--no-start" => {
+                start = false;
+                index += 1;
+            }
+            other => return Err(format!("未知 install-service 参数: {other}")),
+        }
+    }
+    let result = systemd::install(systemd::InstallOptions {
+        web_root,
+        dry_run,
+        start,
+    })
+    .map_err(|error| error.to_string())?;
+    if dry_run {
+        println!("systemd dry-run：不会写文件或调用 systemctl\n");
+        println!("Unit   : {}", result.unit_path.display());
+        println!("Binary : {}", result.binary_path.display());
+        println!("Web    : {}", result.web_root.display());
+        println!();
+        print!("{}", result.unit_text);
+    } else {
+        println!("Coding Tools user service 已安装");
+        println!("  Unit   : {}", result.unit_path.display());
+        println!("  Binary : {}", result.binary_path.display());
+        println!("  Web    : {}", result.web_root.display());
+        println!("  Started: {}", result.started);
+        println!("  Logs   : journalctl --user -u coding-tools.service -f");
+        if result.linger_enabled == Some(false) {
+            println!();
+            println!("提示：当前 user manager 未启用 linger。若希望注销后/开机仍自动运行：");
+            println!("  sudo loginctl enable-linger $USER");
+        }
+    }
+    Ok(())
+}
+
+fn service_uninstall_command(args: &[String]) -> Result<(), String> {
+    let mut keep_bundle = false;
+    let mut dry_run = false;
+    for arg in args {
+        match arg.as_str() {
+            "--keep-bundle" => keep_bundle = true,
+            "--dry-run" => dry_run = true,
+            other => return Err(format!("未知 uninstall-service 参数: {other}")),
+        }
+    }
+    let before = systemd::uninstall(keep_bundle, dry_run).map_err(|error| error.to_string())?;
+    if dry_run {
+        println!("systemd uninstall dry-run：当前 installed={}", before.installed);
+        println!("Unit: {}", before.unit_path.display());
+    } else {
+        println!("Coding Tools user service 已卸载。");
+        if keep_bundle {
+            println!("保留 Binary/Web bundle。")
+        }
+    }
+    Ok(())
+}
+
+fn service_status_command() -> Result<(), String> {
+    let status = systemd::status().map_err(|error| error.to_string())?;
+    println!("installed={}", status.installed);
+    println!("active={}", status.active);
+    println!("enabled={}", status.enabled);
+    println!("unit={}", status.unit_path.display());
+    println!("binary={}", status.binary_path.display());
+    println!("web={}", status.web_root.display());
+    match status.linger_enabled {
+        Some(value) => println!("linger={value}"),
+        None => println!("linger=unknown"),
+    }
+    Ok(())
+}
+
+fn health_command(args: &[String]) -> Result<(), String> {
+    let json = match args {
+        [] => false,
+        [arg] if arg == "--json" => true,
+        _ => return Err("health 仅支持可选参数 --json".into()),
+    };
+    let app = AppState::new().map_err(|error| error.to_string())?;
+    let admin = app
+        .with_settings(|store| Ok(store.settings().admin))
+        .map_err(|error| error.to_string())?;
+    let report = crate::async_runtime::block_on(async {
+        match health_via_admin(&admin).await {
+            Ok(report) => Ok(report),
+            Err(_) => crate::health::run_gateway_health_checks(&app)
+                .await
+                .map_err(|error| error.to_string()),
+        }
+    })?;
+    let ready = report.chatgpt_ready;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report).map_err(|error| error.to_string())?);
+    } else {
+        println!("{}", report.summary);
+        for item in &report.items {
+            println!("[{:<4}] {:<9} {:<24} {}", item.status.to_ascii_uppercase(), item.layer, item.label, item.detail);
+            if !item.hint.is_empty() {
+                println!("       建议: {}", item.hint);
+            }
+        }
+    }
+    if ready {
+        Ok(())
+    } else {
+        Err("Gateway 尚未达到 ChatGPT-ready".into())
     }
 }
 
@@ -270,6 +452,12 @@ fn default_web_root() -> PathBuf {
             if sibling.join("index.html").exists() {
                 return sibling;
             }
+            if let Some(bundle_root) = parent.parent() {
+                let installed_web = bundle_root.join("web");
+                if installed_web.join("index.html").exists() {
+                    return installed_web;
+                }
+            }
             for base in parent.ancestors().take(5) {
                 let candidate = base.join("build");
                 if candidate.join("index.html").exists() {
@@ -323,6 +511,12 @@ fn print_help() {
     println!("  coding-tools tui   [gateway/admin overrides]  # optional terminal monitor");
     println!("  coding-tools workspace list");
     println!("  coding-tools config show");
+    println!("  coding-tools health [--json]");
+    println!("  coding-tools service install [--web-root PATH] [--dry-run] [--no-start]");
+    println!("  coding-tools service status");
+    println!("  coding-tools service uninstall [--keep-bundle] [--dry-run]");
+    println!("  coding-tools install-service ...        # alias");
+    println!("  coding-tools uninstall-service ...      # alias");
     println!();
     println!("Overrides:");
     println!("  --bind IP --port PORT --public-url URL --auth oauth|bearer|noauth");

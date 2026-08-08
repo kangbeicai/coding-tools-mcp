@@ -10,6 +10,7 @@ use crate::gateway::{
     stop_gateway_exposure_service, stop_gateway_service, GatewayExposureStatusDto, GatewayStatusDto,
 };
 use crate::settings::{GatewayConfig, GatewayExposureConfig};
+use crate::health::{run_gateway_health_checks as execute_gateway_health_checks, GatewayHealthReport};
 use serde_json::json;
 
 #[tauri::command]
@@ -76,6 +77,13 @@ pub async fn restart_gateway(state: State<'_, AppState>) -> AppResult<GatewaySta
 #[tauri::command]
 pub fn get_gateway_status(state: State<'_, AppState>) -> AppResult<GatewayStatusDto> {
     gateway_status(&state)
+}
+
+#[tauri::command]
+pub async fn run_gateway_health_checks(
+    state: State<'_, AppState>,
+) -> AppResult<GatewayHealthReport> {
+    execute_gateway_health_checks(&state).await
 }
 
 #[tauri::command]
