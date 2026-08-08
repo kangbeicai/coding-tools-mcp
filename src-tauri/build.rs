@@ -5,10 +5,10 @@ fn main() {
     if std::env::var_os("CARGO_FEATURE_DESKTOP").is_some() {
         tauri_build::build()
     }
-    generate_embedded_web();
+    generate_embedded_web(std::env::var_os("CARGO_FEATURE_HEADLESS").is_some());
 }
 
-fn generate_embedded_web() {
+fn generate_embedded_web(embed_assets: bool) {
     let manifest_dir =
         PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
     let web_root = manifest_dir
@@ -18,10 +18,11 @@ fn generate_embedded_web() {
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR"));
     let generated = out_dir.join("embedded_web.rs");
 
-    println!("cargo:rerun-if-changed={}", web_root.display());
-
     let mut files = Vec::new();
-    collect_files(&web_root, &web_root, &mut files);
+    if embed_assets {
+        println!("cargo:rerun-if-changed={}", web_root.display());
+        collect_files(&web_root, &web_root, &mut files);
+    }
     files.sort_by(|left, right| left.0.cmp(&right.0));
 
     let mut source = String::new();
