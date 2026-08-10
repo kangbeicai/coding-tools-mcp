@@ -12,6 +12,7 @@
     clearGatewaySession,
     setGatewayConfig,
     setGatewayExposure,
+    restartGateway,
     startGateway,
     startGatewayExposure,
     stopGateway,
@@ -42,6 +43,11 @@
   const running = $derived(status?.state === "running");
   const exposureRunning = $derived(exposureStatus?.state === "running");
   const managedExposure = $derived(exposure?.mode === "frp" || exposure?.mode === "cloudflare");
+  const displayedPublicEndpoint = $derived(
+    exposure?.mode === "cloudflare" && exposure.cloudflareMode === "quick" && exposureRunning
+      ? mcpEndpoint(exposureStatus?.effectivePublicUrl ?? "")
+      : status?.publicEndpoint || mcpEndpoint(exposureStatus?.effectivePublicUrl ?? ""),
+  );
 
   onMount(() => {
     void load();
@@ -74,7 +80,7 @@
       config = loadedConfig;
       exposure = loadedExposure;
       status = loadedStatus;
-      exposureStatus = loadedExposureStatus;
+      applyExposureStatus(loadedExposureStatus);
       frpProfiles = loadedFrpProfiles;
       gatewayFrpToken = frpToken ?? "";
       gatewayCloudflareToken = cloudflareToken ?? "";
@@ -108,7 +114,14 @@
     if (exposureBusy || !managedExposure) return;
     exposureBusy = true;
     try {
-      exposureStatus = exposureRunning ? await stopGatewayExposure() : await startGatewayExposure();
+      if (!exposureRunning && exposure) {
+        await setGatewayExposure(exposure);
+        if (gatewayFrpToken.trim()) await setSharedSecret("gateway_frp_token", gatewayFrpToken.trim());
+        if (gatewayCloudflareToken.trim()) {
+          await setSharedSecret("gateway_cloudflare_token", gatewayCloudflareToken.trim());
+        }
+      }
+      applyExposureStatus(exposureRunning ? await stopGatewayExposure() : await startGatewayExposure());
     } catch (error) {
       showToast(String(error), {
         title: exposureRunning ? "停止公网暴露失败" : "启动公网暴露失败",
@@ -156,12 +169,37 @@
     busy = true;
     try {
       status = running ? await stopGateway() : await startGateway();
-      exposureStatus = await getGatewayExposureStatus();
+      applyExposureStatus(await getGatewayExposureStatus());
     } catch (error) {
       showToast(String(error), { title: running ? "停止失败" : "启动失败", kind: "error" });
     } finally {
       busy = false;
     }
+  }
+
+  async function restartRunningGateway() {
+    if (busy || !running) return;
+    busy = true;
+    try {
+      status = await restartGateway();
+      applyExposureStatus(await getGatewayExposureStatus());
+      showToast("Gateway 已重启", { kind: "success" });
+    } catch (error) {
+      showToast(String(error), { title: "重启失败", kind: "error" });
+    } finally {
+      busy = false;
+    }
+  }
+
+  function applyExposureStatus(next: GatewayExposureStatus) {
+    exposureStatus = next;
+    if (!config || !exposure) return;
+    const quickUrl = exposure.mode === "cloudflare"
+      && exposure.cloudflareMode === "quick"
+      && next.state === "running"
+      ? next.effectivePublicUrl
+      : "";
+    config.publicUrl = quickUrl || next.canonicalPublicUrl;
   }
 
   function redactSession(value: string): string {
@@ -191,15 +229,22 @@
           不同项目由会话内的 <span class="tx-mono">select_workspace</span> 绑定，避免每个工作区都创建一个插件。
         </p>
       </div>
-      <button
-        type="button"
-        class="tx-btn-primary"
-        class:tx-btn-danger={running}
-        disabled={busy}
-        onclick={toggleGateway}
-      >
-        {busy ? "处理中…" : running ? "停止 Gateway" : "启动 Gateway"}
-      </button>
+      <div class="flex gap-2">
+        {#if running}
+          <button type="button" class="tx-btn-ghost" disabled={busy} onclick={restartRunningGateway}>
+            {busy ? "处理中…" : "重启 Gateway"}
+          </button>
+        {/if}
+        <button
+          type="button"
+          class="tx-btn-primary"
+          class:tx-btn-danger={running}
+          disabled={busy}
+          onclick={toggleGateway}
+        >
+          {busy ? "处理中…" : running ? "停止 Gateway" : "启动 Gateway"}
+        </button>
+      </div>
     </div>
 
     {#if status}
@@ -214,10 +259,10 @@
         <div class="tx-info-block">
           <div class="tx-info-row">
             <span class="tx-info-label">公网 MCP</span>
-            {#if status.publicEndpoint}<CopyButton value={status.publicEndpoint} />{/if}
+            {#if displayedPublicEndpoint}<CopyButton value={displayedPublicEndpoint} />{/if}
           </div>
           <p class="tx-mono mt-1.5 break-all text-sm text-[var(--color-text-secondary)]">
-            {status.publicEndpoint || "未配置 canonical 公网 URL"}
+            {displayedPublicEndpoint || "未配置公网 URL"}
           </p>
         </div>
       </div>
@@ -253,7 +298,11 @@
             placeholder="https://mcp.example.com（/mcp 可省略）"
           />
           <span class="text-xs text-[var(--color-text-muted)]">
-            ChatGPT 对外访问这个 Gateway 的地址。普通使用只需要填好这个 HTTPS URL，不需要说明端口映射、反向代理或隧道是怎么实现的。
+            {#if exposure?.mode === "cloudflare" && exposure.cloudflareMode === "quick" && exposureRunning}
+              当前 Cloudflare Quick Tunnel 临时地址；重启后会自动刷新，不会永久覆盖 canonical 配置。
+            {:else}
+              ChatGPT 对外访问这个 Gateway 的地址。普通使用只需要填好这个 HTTPS URL。
+            {/if}
           </span>
         </label>
         <label class="grid gap-1.5 text-sm">
@@ -348,7 +397,7 @@
           {:else if exposure.mode === "frp"}
             Coding Tools 启动一个全局 frpc，仅代理 Gateway，而不是每个 Workspace 各启一条线路。
           {:else}
-            Coding Tools 启动 cloudflared；Quick URL 仅作为当前临时地址，不覆盖 canonical URL。
+            Coding Tools 启动 cloudflared；Quick URL 会临时回填到上方公网 URL，停止后恢复 canonical URL。
           {/if}
         </div>
 
@@ -479,4 +528,3 @@
   </section>
   </div>
 </section>
-

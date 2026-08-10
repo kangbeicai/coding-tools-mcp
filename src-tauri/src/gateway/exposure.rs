@@ -214,6 +214,13 @@ pub async fn start_gateway_exposure_service(
         _ => unreachable!(),
     };
 
+    state.with_gateway(|gateway| {
+        if let Some(gateway) = gateway.as_ref() {
+            gateway.set_public_url(&process.effective_public_url);
+        }
+        Ok(())
+    })?;
+
     state.with_gateway_exposure(|slot| {
         *slot = Some(process);
         Ok(())
@@ -224,6 +231,8 @@ pub async fn start_gateway_exposure_service(
 pub async fn stop_gateway_exposure_service(
     state: &AppState,
 ) -> AppResult<GatewayExposureStatusDto> {
+    let canonical = state
+        .with_settings(|store| normalize_public_origin(&store.settings().gateway.public_url))?;
     let process = state.with_gateway_exposure(|slot| Ok(slot.take()))?;
     if let Some(process) = process {
         let mode = process.mode.clone();
@@ -232,6 +241,12 @@ pub async fn stop_gateway_exposure_service(
             clear_managed_frpc_pid(GATEWAY_EXPOSURE_ID);
         }
     }
+    state.with_gateway(|gateway| {
+        if let Some(gateway) = gateway.as_ref() {
+            gateway.set_public_url(&canonical);
+        }
+        Ok(())
+    })?;
     gateway_exposure_status(state)
 }
 

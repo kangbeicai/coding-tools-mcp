@@ -4,9 +4,7 @@ use crate::app_state::AppState;
 use crate::error::{AppError, AppResult};
 use crate::settings::GatewayConfig;
 
-use super::exposure::{
-    normalize_public_origin, start_gateway_exposure_service, stop_gateway_exposure_service,
-};
+use super::exposure::{normalize_public_origin, stop_gateway_exposure_service};
 use super::listener::spawn_listener;
 use super::state::GatewaySessionInfo;
 
@@ -41,6 +39,13 @@ pub fn set_gateway_config(state: &AppState, mut gateway: GatewayConfig) -> AppRe
 }
 
 pub async fn start_gateway_service(state: &AppState) -> AppResult<GatewayStatusDto> {
+    start_gateway_listener(state, None).await
+}
+
+async fn start_gateway_listener(
+    state: &AppState,
+    initial_public_url: Option<&str>,
+) -> AppResult<GatewayStatusDto> {
     if state.with_gateway(|process| Ok(process.is_some()))? {
         return gateway_status(state);
     }
@@ -48,7 +53,8 @@ pub async fn start_gateway_service(state: &AppState) -> AppResult<GatewayStatusD
         store.init_shared_secrets()?;
         Ok((store.settings().gateway, store.list().to_vec()))
     })?;
-    let process = spawn_listener(config, profiles).map_err(AppError::Message)?;
+    let process =
+        spawn_listener(config, profiles, initial_public_url).map_err(AppError::Message)?;
     state.with_gateway(|slot| {
         *slot = Some(process);
         Ok(())
@@ -58,22 +64,41 @@ pub async fn start_gateway_service(state: &AppState) -> AppResult<GatewayStatusD
 
 pub async fn stop_gateway_service(state: &AppState) -> AppResult<GatewayStatusDto> {
     let _ = stop_gateway_exposure_service(state).await?;
+    stop_gateway_listener(state).await?;
+    gateway_status(state)
+}
+
+async fn stop_gateway_listener(state: &AppState) -> AppResult<()> {
     let process = state.with_gateway(|slot| Ok(slot.take()))?;
     if let Some(process) = process {
         let _ = process.shutdown.send(());
         let _ = process.handle.await;
     }
-    gateway_status(state)
+    Ok(())
 }
 
 pub async fn restart_gateway_service(state: &AppState) -> AppResult<GatewayStatusDto> {
-    let exposure_was_running = state.with_gateway_exposure(|process| Ok(process.is_some()))?;
-    let _ = stop_gateway_service(state).await?;
-    let status = start_gateway_service(state).await?;
-    if exposure_was_running {
-        let _ = start_gateway_exposure_service(state).await?;
+    let effective_public_url = state.with_gateway_exposure(|process| {
+        let Some(process) = process.as_mut() else {
+            return Ok(None);
+        };
+        Ok(process
+            .child
+            .try_wait()?
+            .is_none()
+            .then(|| process.effective_public_url.clone()))
+    })?;
+
+    stop_gateway_listener(state).await?;
+    match start_gateway_listener(state, effective_public_url.as_deref()).await {
+        Ok(status) => Ok(status),
+        Err(error) => {
+            if effective_public_url.is_some() {
+                let _ = stop_gateway_exposure_service(state).await;
+            }
+            Err(error)
+        }
     }
-    Ok(status)
 }
 
 pub fn gateway_status(state: &AppState) -> AppResult<GatewayStatusDto> {

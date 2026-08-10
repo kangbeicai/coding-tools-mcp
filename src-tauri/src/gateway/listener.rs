@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use axum::extract::{Form, Path, Query, State};
 use axum::http::{header::CACHE_CONTROL, HeaderMap, StatusCode};
@@ -29,7 +29,7 @@ struct ListenerState {
     gateway: SharedGatewayState,
     auth: AuthConfig,
     bind_port: u16,
-    configured_public_url: String,
+    configured_public_url: Arc<RwLock<String>>,
     bearer_token: Option<String>,
     oauth: Option<Arc<OAuthRuntime>>,
     oauth_client_secret: Option<String>,
@@ -40,11 +40,19 @@ pub struct GatewayProcess {
     pub handle: crate::async_runtime::JoinHandle<()>,
     pub state: SharedGatewayState,
     pub local_endpoint: String,
+    configured_public_url: Arc<RwLock<String>>,
+}
+
+impl GatewayProcess {
+    pub fn set_public_url(&self, value: &str) {
+        set_runtime_public_url(&self.configured_public_url, value);
+    }
 }
 
 pub fn spawn_listener(
     config: GatewayConfig,
     profiles: Vec<WorkspaceProfile>,
+    initial_public_url: Option<&str>,
 ) -> Result<GatewayProcess, String> {
     let client_id = SecretStore::get_shared("oauth_client_id")
         .map_err(|error| error.to_string())?
@@ -102,8 +110,7 @@ pub fn spawn_listener(
 
     let bind_host = config.bind_host.trim().to_string();
     let port = config.local_port;
-    let configured_public_url =
-        normalize_public_origin(&config.public_url).map_err(|error| error.to_string())?;
+    let configured_public_url = resolve_initial_public_url(&config.public_url, initial_public_url)?;
     let oauth = if auth.oauth_enabled() {
         let base = external_base_url(&HeaderMap::new(), port, &configured_public_url);
         Some(Arc::new(OAuthRuntime::new(
@@ -116,12 +123,13 @@ pub fn spawn_listener(
     } else {
         None
     };
+    let configured_public_url = Arc::new(RwLock::new(configured_public_url));
     let listener = bind_listener(&bind_host, port)?;
     let state = ListenerState {
         gateway: gateway.clone(),
         auth,
         bind_port: port,
-        configured_public_url,
+        configured_public_url: configured_public_url.clone(),
         bearer_token,
         oauth,
         oauth_client_secret,
@@ -148,7 +156,16 @@ pub fn spawn_listener(
         handle,
         state: gateway,
         local_endpoint,
+        configured_public_url,
     })
+}
+
+fn resolve_initial_public_url(
+    canonical_public_url: &str,
+    runtime_public_url: Option<&str>,
+) -> Result<String, String> {
+    normalize_public_origin(runtime_public_url.unwrap_or(canonical_public_url))
+        .map_err(|error| error.to_string())
 }
 
 async fn serve(
@@ -325,7 +342,21 @@ fn local_endpoint(bind_host: &str, port: u16) -> String {
 }
 
 fn resolve_oauth_base(state: &ListenerState, headers: &HeaderMap) -> String {
-    external_base_url(headers, state.bind_port, &state.configured_public_url)
+    external_base_url(
+        headers,
+        state.bind_port,
+        &runtime_public_url(&state.configured_public_url),
+    )
+}
+
+fn runtime_public_url(value: &Arc<RwLock<String>>) -> String {
+    value.read().map(|value| value.clone()).unwrap_or_default()
+}
+
+fn set_runtime_public_url(target: &Arc<RwLock<String>>, value: &str) {
+    if let Ok(mut target) = target.write() {
+        *target = value.trim().trim_end_matches('/').to_string();
+    }
 }
 
 fn require_mcp_auth(state: &ListenerState, headers: &HeaderMap) -> Option<Response> {
@@ -432,6 +463,34 @@ mod tests {
         assert_eq!(
             local_endpoint("0.0.0.0", 28766),
             "http://127.0.0.1:28766/mcp"
+        );
+    }
+
+    #[test]
+    fn runtime_public_url_can_follow_managed_exposure() {
+        let value = Arc::new(RwLock::new("https://canonical.example.com".to_string()));
+        set_runtime_public_url(&value, "https://quick.trycloudflare.com/");
+        assert_eq!(
+            runtime_public_url(&value),
+            "https://quick.trycloudflare.com"
+        );
+        set_runtime_public_url(&value, "https://canonical.example.com");
+        assert_eq!(runtime_public_url(&value), "https://canonical.example.com");
+    }
+
+    #[test]
+    fn listener_restart_prefers_running_exposure_url() {
+        assert_eq!(
+            resolve_initial_public_url(
+                "https://canonical.example.com",
+                Some("https://temporary.trycloudflare.com/"),
+            )
+            .unwrap(),
+            "https://temporary.trycloudflare.com"
+        );
+        assert_eq!(
+            resolve_initial_public_url("https://canonical.example.com/", None).unwrap(),
+            "https://canonical.example.com"
         );
     }
 }

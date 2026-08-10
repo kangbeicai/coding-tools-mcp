@@ -1,6 +1,5 @@
 <script lang="ts">
   import { page } from "$app/stores";
-  import { onMount } from "svelte";
   import { getGatewayStatus } from "$lib/api/gateway";
   import { deleteWorkspace, listWorkspaces, updateWorkspace } from "$lib/api/workspaces";
   import { goto } from "$app/navigation";
@@ -13,25 +12,38 @@
   let profile = $state<WorkspaceProfile | null>(null);
   let gatewayRunning = $state(false);
   let saving = $state(false);
+  let loadGeneration = 0;
 
   const workspaceId = $derived($page.params.id);
   const route = $derived(profile ? `/w/${profile.id}/mcp` : "");
 
-  onMount(() => {
-    void load();
-  });
-
-  async function load() {
+  async function load(id = workspaceId) {
+    if (!id) return;
+    const generation = ++loadGeneration;
     try {
       const [items, status] = await Promise.all([listWorkspaces(), getGatewayStatus()]);
+      if (generation !== loadGeneration || id !== workspaceId) return;
       workspaces.set(items);
-      profile = items.find((item) => item.id === workspaceId) ?? null;
+      const nextProfile = items.find((item) => item.id === id) ?? null;
+      profile = nextProfile;
       gatewayRunning = status.state === "running";
-      if (profile) await setLastWorkspace(profile.id);
+      if (nextProfile) await setLastWorkspace(nextProfile.id);
     } catch (error) {
+      if (generation !== loadGeneration || id !== workspaceId) return;
       showToast(String(error), { title: "读取工作区失败", kind: "error" });
     }
   }
+
+  $effect(() => {
+    const id = workspaceId;
+    if (!id) return;
+    profile = null;
+    void load(id);
+
+    return () => {
+      loadGeneration += 1;
+    };
+  });
 
   async function removeWorkspace() {
     if (!profile || gatewayRunning) return;

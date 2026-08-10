@@ -173,6 +173,8 @@ sudo loginctl enable-linger "$USER"
 3. 设置工作区名称和该项目自己的执行/工具策略。
 4. 保存后，工作区会长期保留在左侧列表中。
 
+Web Console 可以直接在侧栏切换工作区，不需要刷新浏览器。页面会立即清除旧工作区内容并加载新选择；快速连续切换时，较早返回的请求不会覆盖当前页面。
+
 ### 3. 启动全局 Gateway
 
 第一次运行 `coding-tools` 后，在“设置 → Gateway”中配置全局 MCP Gateway。之后每次手动运行 `coding-tools` 都会读取持久化配置并自动启动 Gateway；若 Public Access 为 Managed FRP/Cloudflare，也会自动恢复对应 exposure：
@@ -180,10 +182,17 @@ sudo loginctl enable-linger "$USER"
 - 默认监听 `127.0.0.1:28766`，只允许本机访问；
 - 需要局域网访问或路由器端口映射时，把监听地址改为 `0.0.0.0` 或指定网卡 IP；
 - `Canonical 公网 URL` 是 Gateway 对外的固定身份，例如 `https://mcp.example.com`；最终 MCP 地址是 `https://mcp.example.com/mcp`；
-- 使用 OAuth 时，Authorization/Token/Protected Resource metadata 均以这个 canonical URL 为基准；FRP/Cloudflare 配置不会反向覆盖它；
+- 使用 OAuth 时，Authorization/Token/Protected Resource metadata 使用当前有效公网 origin：固定部署使用 canonical URL，Cloudflare Quick 运行期间使用当前临时 effective URL；Quick URL 不会写回持久化配置；
 - Gateway 使用共享 OAuth/Bearer 凭据，一个 ChatGPT 插件即可访问所有已注册工作区；
 - 当注册了两个及以上工作区时，项目工具在执行前必须先通过 `select_workspace` 绑定当前会话；
 - `/w/<workspace-id>/mcp` 是显式路径路由，主要用于调试或其他 MCP 客户端，并不要求在 ChatGPT 中分别创建插件。
+
+Gateway 与 managed exposure 是两个独立生命周期：
+
+- “重启 Gateway”只替换本地 listener，正在运行的 FRP/cloudflared 子进程、PID 和 effective URL 保持不变；
+- 新 listener 会在开始接收 OAuth/MCP 请求前继承当前 effective URL；
+- 显式“停止 Gateway”仍会先停止 managed exposure，避免留下没有本地后端的公网入口；
+- 如果 listener 重启失败，程序会清理此前保留的 exposure。
 
 标准手动生命周期为：
 
@@ -215,7 +224,46 @@ Coding Tools 不要求用户说明这个 URL 背后究竟是路由器端口映�
 
 只有希望 **Coding Tools 自己管理公网隧道进程** 时，才需要进入“公网访问 · 高级”选择 `Managed FRP` 或 `Managed Cloudflare`。其中 FRP 会创建一条全局 `gateway-mcp` 路由，而不是每个 Workspace 各建一条线路。
 
-Cloudflare **Quick Tunnel** 是特殊情况：它会生成临时 `trycloudflare.com` 地址。Web Console 会把它显示为“当前有效地址”，但不会写回或覆盖 canonical 公网 URL；因此需要固定 OAuth/ChatGPT Connector 地址的正式部署应使用 Named Tunnel 或其他固定域名方式。
+公网方式的选择：
+
+| 方式 | 地址生命周期 | Web Console 配置 | 适合场景 |
+| --- | --- | --- | --- |
+| 非托管公网入口 | 由用户自己的代理/NAT 决定 | 只填写公网 URL | 已有 Nginx、Caddy、端口映射或其他隧道 |
+| Managed FRP | 由 FRPS 域名配置决定 | Managed FRP + 服务器/子域名/Token | 自建 FRP |
+| Cloudflare Quick | 每次 cloudflared 进程重建时通常变化 | Managed Cloudflare + Quick | 临时测试 |
+| Cloudflare Named | 固定自有域名 | 公网 URL + Named + Tunnel Token | ChatGPT/OAuth 正式部署 |
+
+#### Cloudflare Quick Tunnel
+
+选择 `Managed Cloudflare Tunnel → Quick Tunnel` 后点击“启动公网暴露”。Coding Tools 会自动启动：
+
+```bash
+cloudflared tunnel --url http://127.0.0.1:28766
+```
+
+Web Console 会把生成的 `https://随机名称.trycloudflare.com` 显示为当前有效地址和 MCP 地址。该地址只存在于运行状态，不会写回或覆盖 canonical 公网 URL；停止 cloudflared、重启整个应用或机器后可能变化。仅点击“重启 Gateway”不会重建 cloudflared，因此当前 Quick URL 会保持不变。
+
+#### Cloudflare Named Tunnel（固定域名）
+
+固定地址推荐使用 Named Tunnel，例如：
+
+```text
+Canonical 公网 URL  https://mcp.example.com
+最终 MCP 地址       https://mcp.example.com/mcp
+本地 Service        http://127.0.0.1:28766
+```
+
+1. 在 Cloudflare Zero Trust 中创建 Cloudflared Tunnel。
+2. 在该 Tunnel 中添加 `Published application route`（旧界面叫 `Public Hostname`）。
+3. Hostname 填写 `mcp.example.com`，Service 选择 `HTTP` 并填写 `http://127.0.0.1:28766`。
+4. 不要添加 `CIDR`、`Private Network` 或 `WARP Route`；这些路由要求 Cloudflare One Client/WARP，不适合 ChatGPT 公网访问。
+5. 从 Cloudflare 安装命令 `cloudflared tunnel run --token <TOKEN>` 中复制 `<TOKEN>` 部分。
+6. 在“设置 → Gateway”填写 `https://mcp.example.com`，保存并启动 Gateway。
+7. 在“公网访问 · 高级”选择 `Managed Cloudflare Tunnel → Named Tunnel`，把 Token 粘贴到 `Tunnel Token` 输入框，再启动公网暴露。
+
+Tunnel Token 通过 Secret API 保存，不写入普通 Gateway 配置。只粘贴 Token 本身，不要粘贴整条命令；Token 属于敏感凭据，若出现在聊天、Issue、日志或公开截图中，应立即在 Cloudflare 控制台轮换。
+
+Named Tunnel 的固定域名映射由 Cloudflare Dashboard 的 Published Application Route 决定；Token 只负责让 cloudflared 连接现有 Tunnel，不会自动创建 hostname 路由。
 
 ![FRP 配置页面](docs/images/frp-configuration.png)
 
@@ -255,7 +303,7 @@ coding-tools health --json
 
 *日志可快速确认工具列表、历史初始化和检查点调用是否真正到达服务端。*
 
-支持 MCP 的客户端使用同一个 Gateway canonical 公网 URL。使用 OAuth 时，Gateway 使用共享 OAuth 凭据，不再要求每个工作区单独授权；OAuth metadata 也始终从 canonical URL 生成，而不是从 FRP/Cloudflare provider 配置推导。
+支持 MCP 的客户端使用同一个 Gateway 公网 URL。使用 OAuth 时，Gateway 使用共享 OAuth 凭据，不再要求每个工作区单独授权。固定部署的 OAuth metadata 使用 canonical URL；Cloudflare Quick 运行期间则使用当前 effective URL，确保 issuer、resource、authorization endpoint、token endpoint 与实际访问地址一致。
 
 新对话的推荐初始化顺序：
 
@@ -335,6 +383,9 @@ check_exec_environment
 | --- | --- |
 | ChatGPT 无法连接 | 是否使用公网 HTTPS `/mcp` 地址，而不是 `127.0.0.1`；桌面端公网 MCP 健康检查是否通过 |
 | OAuth 授权失败 | Gateway 是否使用共享 OAuth 凭据；公网基地址是否与实际 HTTPS 地址一致 |
+| Cloudflare 提示需要 One Client/WARP | 添加成了 CIDR/Private Network；改为 Published Application Route/Public Hostname |
+| Gateway 重启后公网不可用 | 检查 exposure 状态；新版会保留存活 tunnel，若 listener 重启失败则会安全停止 exposure |
+| Named Tunnel 无法连接 | 确认 Public Hostname 指向 `http://127.0.0.1:28766`，Web 中只填写 Token 本身，并检查 Token 是否已轮换失效 |
 | 看不到新增工具 | 断开并重新连接插件，然后创建一个新对话 |
 | 返回“尚未选择工作区” | 先调用 `list_workspaces` 和 `select_workspace`；多工作区模式不会猜测项目 |
 | 工具调用失败 | 检查 Gateway 日志和当前会话绑定的 workspace，确认请求没有路由到错误项目 |
