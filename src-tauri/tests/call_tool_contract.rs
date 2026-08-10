@@ -3,13 +3,10 @@ mod common;
 use std::fs;
 use std::process::Command;
 
-use coding_tools_mcp_desktop_lib::tools::list_tools_for_profile;
+use coding_tools_mcp::tools::list_tools_for_profile;
 use common::*;
 use serde_json::{json, Value};
 
-#[cfg(windows)]
-const TEST_PYTHON: &str = "python";
-#[cfg(not(windows))]
 const TEST_PYTHON: &str = "python3";
 
 #[test]
@@ -180,11 +177,11 @@ fn git_log_root_does_not_pass_empty_pathspec() {
 
 #[test]
 fn advanced_profile_exposes_every_declared_tool() {
-    let declared = coding_tools_mcp_desktop_lib::tools::registry::P0_TOOLS
+    let declared = coding_tools_mcp::tools::registry::P0_TOOLS
         .iter()
         .map(|(name, ..)| *name)
         .collect::<std::collections::HashSet<_>>();
-    let tool_values = coding_tools_mcp_desktop_lib::tools::list_tools_for_profile("advanced");
+    let tool_values = coding_tools_mcp::tools::list_tools_for_profile("advanced");
     let exposed = tool_values
         .iter()
         .filter_map(|tool| tool["name"].as_str())
@@ -193,17 +190,17 @@ fn advanced_profile_exposes_every_declared_tool() {
     assert_eq!(declared, exposed);
     assert!(declared
         .iter()
-        .all(|name| coding_tools_mcp_desktop_lib::tools::is_allowed_tool(name)));
+        .all(|name| coding_tools_mcp::tools::is_allowed_tool(name)));
 }
 
 #[test]
 fn core_profile_keeps_the_default_capabilities_and_adds_history_tools() {
-    let tools = coding_tools_mcp_desktop_lib::tools::list_tools_for_profile("core");
+    let tools = coding_tools_mcp::tools::list_tools_for_profile("core");
     let names = tools
         .iter()
         .filter_map(|tool| tool["name"].as_str())
         .collect::<std::collections::HashSet<_>>();
-    let expected = coding_tools_mcp_desktop_lib::tools::registry::CORE_TOOLS
+    let expected = coding_tools_mcp::tools::registry::CORE_TOOLS
         .iter()
         .copied()
         .collect::<std::collections::HashSet<_>>();
@@ -471,10 +468,10 @@ fn search_text_stops_after_max_results() {
 
 #[test]
 fn grep_reuses_search_text_schema_and_behavior() {
-    let schema = coding_tools_mcp_desktop_lib::tools::registry::input_schema("grep");
+    let schema = coding_tools_mcp::tools::registry::input_schema("grep");
     assert_eq!(
         schema,
-        coding_tools_mcp_desktop_lib::tools::registry::input_schema("search_text")
+        coding_tools_mcp::tools::registry::input_schema("search_text")
     );
 
     let fx = tiny_js_fixture();

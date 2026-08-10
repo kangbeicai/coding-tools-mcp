@@ -283,38 +283,8 @@ fn atomic_write(target: &Path, content: &[u8]) -> WorkspaceResult<()> {
     result.map_err(|error| io_error("HISTORY_WRITE_FAILED", error, true))
 }
 
-#[cfg(not(windows))]
 fn atomic_replace(source: &Path, target: &Path) -> io::Result<()> {
     fs::rename(source, target)
-}
-
-#[cfg(windows)]
-fn atomic_replace(source: &Path, target: &Path) -> io::Result<()> {
-    use std::os::windows::ffi::OsStrExt;
-
-    use windows::core::PCWSTR;
-    use windows::Win32::Storage::FileSystem::{
-        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
-    };
-
-    let source = source
-        .as_os_str()
-        .encode_wide()
-        .chain(Some(0))
-        .collect::<Vec<_>>();
-    let target = target
-        .as_os_str()
-        .encode_wide()
-        .chain(Some(0))
-        .collect::<Vec<_>>();
-    unsafe {
-        MoveFileExW(
-            PCWSTR(source.as_ptr()),
-            PCWSTR(target.as_ptr()),
-            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
-        )
-        .map_err(|error| io::Error::other(error.to_string()))
-    }
 }
 
 fn io_error(code: &'static str, error: io::Error, retryable: bool) -> WorkspaceError {

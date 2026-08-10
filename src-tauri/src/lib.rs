@@ -1,12 +1,11 @@
-#![cfg_attr(target_os = "windows", allow(linker_messages))]
+#[cfg(not(target_os = "linux"))]
+compile_error!("coding-tools currently supports Linux only");
 
 mod async_runtime;
 pub mod admin;
 mod actions;
 mod app_state;
 mod auth;
-#[cfg(feature = "desktop")]
-mod commands;
 mod data;
 mod error;
 pub mod gateway;
@@ -20,145 +19,4 @@ mod secret;
 mod settings;
 pub mod tools;
 mod tunnel;
-mod update;
 mod workspace;
-
-#[cfg(feature = "desktop")]
-use app_state::AppState;
-#[cfg(feature = "desktop")]
-use commands::{
-    check_app_update, create_workspace, delete_frp_profile, delete_workspace,
-    get_actions_runtime_status, get_app_settings, get_download_config, get_frp_snippet,
-    clear_gateway_session, get_gateway_config, get_gateway_exposure, get_gateway_exposure_status,
-    get_gateway_status,
-    get_last_workspace_id, get_proxy, get_runtime_status, get_shared_secret, get_webview_memory_sample,
-    get_workspace_secret, install_software, list_frp_profiles, list_software, list_workspaces,
-    open_url, open_workspace_directory, read_workspace_logs, recreate_ui_webview,
-    regenerate_shared_secret, regenerate_workspace_secret, restart_actions_runtime, restart_gateway,
-    restart_runtime, restart_tunnel, run_gateway_health_checks, run_health_checks, save_frp_profile, set_download_config,
-    set_gateway_config, set_gateway_exposure, set_last_workspace, set_proxy, set_shared_secret,
-    set_workspace_secret, start_actions_runtime, start_gateway, start_gateway_exposure, start_runtime,
-    start_tunnel, stop_actions_runtime, stop_gateway, stop_gateway_exposure, stop_runtime, stop_tunnel,
-    test_tunnel,
-    uninstall_software,
-    update_workspace,
-};
-#[cfg(feature = "desktop")]
-use tauri::Manager;
-
-#[cfg(target_os = "windows")]
-fn acquire_single_instance() -> bool {
-    use windows::core::w;
-    use windows::Win32::Foundation::{CloseHandle, GetLastError, ERROR_ALREADY_EXISTS};
-    use windows::Win32::System::Threading::CreateMutexW;
-
-    // 保持 mutex HANDLE 到进程退出，由 Windows 自动回收。第二个实例必须在
-    // cleanup_managed_frpc_instances 之前退出，否则会清理第一个实例的 frpc。
-    let Ok(handle) = (unsafe {
-        CreateMutexW(
-            None,
-            false,
-            w!("Local\\CodingToolsMcpDesktop-SingleInstance"),
-        )
-    }) else {
-        eprintln!("创建应用单实例锁失败，为避免误清理其他实例的 frpc，本次启动已取消");
-        return false;
-    };
-    if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
-        let _ = unsafe { CloseHandle(handle) };
-        return false;
-    }
-    true
-}
-
-#[cfg(not(target_os = "windows"))]
-fn acquire_single_instance() -> bool {
-    true
-}
-
-#[cfg(feature = "desktop")]
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
-pub fn run() {
-    if !acquire_single_instance() {
-        return;
-    }
-    tauri::Builder::default()
-        .plugin(tauri_plugin_dialog::init())
-        .setup(|app| {
-            app.manage(AppState::new().expect("failed to load app state"));
-            // Recover FRP clients that stay alive while the public proxy dies
-            // (common after install/restart network blips).
-            tunnel::ensure_frp_health_loop();
-            Ok(())
-        })
-        .invoke_handler(tauri::generate_handler![
-            list_workspaces,
-            create_workspace,
-            update_workspace,
-            open_workspace_directory,
-            open_url,
-            check_app_update,
-            delete_workspace,
-            start_runtime,
-            stop_runtime,
-            get_runtime_status,
-            get_gateway_config,
-            set_gateway_config,
-            get_gateway_exposure,
-            set_gateway_exposure,
-            get_gateway_exposure_status,
-            start_gateway_exposure,
-            stop_gateway_exposure,
-            start_gateway,
-            stop_gateway,
-            restart_gateway,
-            get_gateway_status,
-            run_gateway_health_checks,
-            clear_gateway_session,
-            start_actions_runtime,
-            stop_actions_runtime,
-            get_actions_runtime_status,
-            restart_runtime,
-            restart_actions_runtime,
-            get_frp_snippet,
-            start_tunnel,
-            stop_tunnel,
-            run_health_checks,
-            get_workspace_secret,
-            set_workspace_secret,
-            regenerate_workspace_secret,
-            get_shared_secret,
-            set_shared_secret,
-            regenerate_shared_secret,
-            read_workspace_logs,
-            list_frp_profiles,
-            save_frp_profile,
-            delete_frp_profile,
-            get_app_settings,
-            restart_tunnel,
-            test_tunnel,
-            set_last_workspace,
-            get_last_workspace_id,
-            list_software,
-            install_software,
-            uninstall_software,
-            get_download_config,
-            set_download_config,
-            get_proxy,
-            set_proxy,
-            get_webview_memory_sample,
-            recreate_ui_webview,
-        ])
-        .build(tauri::generate_context!())
-        .expect("error while building tauri application")
-        .run(|_app_handle, event| {
-            // While recreating the UI WebView we temporarily destroy the main
-            // window; without prevent_exit Tauri would quit the whole process
-            // and take MCP/FRP down with it (0.1.30 regression).
-            if let tauri::RunEvent::ExitRequested { api, .. } = event {
-                if commands::ui_memory::should_prevent_exit() {
-                    api.prevent_exit();
-                }
-            }
-        });
-}

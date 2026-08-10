@@ -1,4 +1,4 @@
-# 设计系统：Coding Tools MCP Desktop
+# 设计系统：Coding Tools MCP Web Console
 
 > 2026 开发者工具审美 — 克制、精致、有呼吸感
 
@@ -46,7 +46,7 @@
 | [交互规范](./design-guidelines/02-interaction.md) | 八态、动效、反馈 |
 | [布局规范](./design-guidelines/03-layout.md) | 页面结构、栅格、组件层级 |
 | [技术配置](./design-guidelines/04-config.md) | Tailwind + Svelte 实现 |
-| [UI 规格](../specs/rust-desktop-client/ui-design.md) | 页面线框与组件清单 |
+| [Headless-only 设计](./specs/linux-headless-only/design.md) | Web Console 与 Linux Gateway 边界 |
 
 ## 交付检查清单
 

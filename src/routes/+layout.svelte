@@ -3,65 +3,27 @@
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
   import { page } from "$app/stores";
-  import { open } from "@tauri-apps/plugin-dialog";
-  import { isTauriRuntime } from "$lib/api/transport";
   import AppShell from "$lib/components/AppShell.svelte";
   import ToastHost from "$lib/components/ToastHost.svelte";
   import WorkspaceNavItem from "$lib/components/WorkspaceNavItem.svelte";
-  import {
-    createWorkspace,
-    getActionsRuntimeStatus,
-    getRuntimeStatus,
-    listWorkspaces,
-  } from "$lib/api/workspaces";
-  import { getLastWorkspaceId } from "$lib/api/settings";
-  import { actionsRuntimeStates, mcpRuntimeStates, workspaces } from "$lib/stores/app";
+  import { createWorkspace, listWorkspaces } from "$lib/api/workspaces";
+  import { workspaces } from "$lib/stores/app";
   import { showToast } from "$lib/stores/toast";
-  import { startUiMemoryGuard } from "$lib/ui-memory-guard";
-  import type { RuntimeState } from "$lib/types";
 
   let { children } = $props();
-  let desktopMode = $state(false);
 
   async function refreshWorkspaces() {
     const items = await listWorkspaces();
     workspaces.set(items);
-
-    const mcpStates: Record<string, RuntimeState> = {};
-    const actionsStates: Record<string, RuntimeState> = {};
-    await Promise.all(
-      items.map(async (item) => {
-        try {
-          const [mcp, actions] = await Promise.all([
-            getRuntimeStatus(item.id),
-            getActionsRuntimeStatus(item.id),
-          ]);
-          mcpStates[item.id] = mcp.state;
-          actionsStates[item.id] = actions.state;
-        } catch {
-          mcpStates[item.id] = "stopped";
-          actionsStates[item.id] = "stopped";
-        }
-      }),
-    );
-    mcpRuntimeStates.set(mcpStates);
-    actionsRuntimeStates.set(actionsStates);
   }
 
   async function addWorkspace() {
     try {
-      let selected: string | null = null;
-      if (isTauriRuntime()) {
-        const picked = await open({ directory: true, multiple: false });
-        if (!picked || Array.isArray(picked)) return;
-        selected = picked;
-      } else {
-        selected = window.prompt("请输入服务器上的工作区绝对路径，例如 /home/user/project：")?.trim() || null;
-        if (!selected) return;
-      }
+      const selected = window.prompt("请输入服务器上的工作区绝对路径，例如 /home/user/project：")?.trim();
+      if (!selected) return;
       const profile = await createWorkspace(selected);
       await refreshWorkspaces();
-      goto(isTauriRuntime() ? `/workspace/${profile.id}` : `/web/workspace/${profile.id}`);
+      goto(`/web/workspace/${profile.id}`);
     } catch (error) {
       showToast(String(error), {
         title: "添加工作区失败",
@@ -72,23 +34,11 @@
   }
 
   function openWorkspace(id: string) {
-    goto(isTauriRuntime() ? `/workspace/${id}` : `/web/workspace/${id}`);
-  }
-
-  function openFrpSettings() {
-    goto("/settings/frp");
+    goto(`/web/workspace/${id}`);
   }
 
   function openGatewaySettings() {
     goto("/settings/gateway");
-  }
-
-  function openSoftwareSettings() {
-    goto("/settings/software");
-  }
-
-  function openGeneralSettings() {
-    goto("/settings/general");
   }
 
   function openKeysSettings() {
@@ -96,25 +46,13 @@
   }
 
   onMount(() => {
-    desktopMode = isTauriRuntime();
-    const stopGuard = desktopMode ? startUiMemoryGuard() : () => {};
     void (async () => {
       await refreshWorkspaces();
       const path = $page.url.pathname;
       if (path === "/") {
-        if (!desktopMode) {
-          goto("/settings/gateway");
-          return;
-        }
-        const lastId = await getLastWorkspaceId();
-        if (lastId && $workspaces.some((item) => item.id === lastId)) {
-          goto(`/workspace/${lastId}`);
-        } else if ($workspaces.length > 0) {
-          goto(`/workspace/${$workspaces[0].id}`);
-        }
+        goto("/settings/gateway");
       }
     })();
-    return stopGuard;
   });
 </script>
 
@@ -134,38 +72,13 @@
     >
       共享密钥
     </button>
-    {#if desktopMode}
-      <button
-        type="button"
-        class="tx-settings-link {$page.url.pathname === '/settings/general' ? 'active' : ''}"
-        onclick={openGeneralSettings}
-      >
-        通用
-      </button>
-      <button
-        type="button"
-        class="tx-settings-link {$page.url.pathname === '/settings/frp' ? 'active' : ''}"
-        onclick={openFrpSettings}
-      >
-        FRP 配置
-      </button>
-      <button
-        type="button"
-        class="tx-settings-link {$page.url.pathname === '/settings/software' ? 'active' : ''}"
-        onclick={openSoftwareSettings}
-      >
-        软件管理
-      </button>
-    {/if}
   {/snippet}
   {#snippet sidebar()}
     <div class="space-y-1">
       {#each $workspaces as workspace (workspace.id)}
         <WorkspaceNavItem
           workspace={workspace}
-          active={$page.url.pathname === `/workspace/${workspace.id}` || $page.url.pathname === `/web/workspace/${workspace.id}`}
-          mcpState={$mcpRuntimeStates[workspace.id] ?? "stopped"}
-          actionsState={$actionsRuntimeStates[workspace.id] ?? "stopped"}
+          active={$page.url.pathname === `/web/workspace/${workspace.id}`}
           onClick={() => openWorkspace(workspace.id)}
         />
       {/each}

@@ -3,8 +3,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use coding_tools_mcp_desktop_lib::tools::policy::{validate_tool_arguments, PolicySettings};
-use coding_tools_mcp_desktop_lib::tools::{call_tool, ToolContext};
+use coding_tools_mcp::tools::policy::{validate_tool_arguments, PolicySettings};
+use coding_tools_mcp::tools::{call_tool, ToolContext};
 use serde_json::{json, Value};
 
 pub struct FixtureWorkspace {
@@ -46,14 +46,7 @@ fn prepare_fixture(name: &str, symlink_escape: bool) -> FixtureWorkspace {
     if symlink_escape {
         let link = root.join("outside-link.txt");
         let _ = fs::remove_file(&link);
-        #[cfg(unix)]
         std::os::unix::fs::symlink(&outside_secret, &link).expect("symlink");
-        #[cfg(windows)]
-        {
-            if std::os::windows::fs::symlink_file(&outside_secret, &link).is_err() {
-                eprintln!("skip symlink setup on windows");
-            }
-        }
     }
     FixtureWorkspace {
         root,
@@ -104,20 +97,8 @@ fn copy_dir_all(src: &Path, dst: &Path) -> std::io::Result<()> {
         if file_type.is_dir() {
             copy_dir_all(&entry.path(), &target)?;
         } else if file_type.is_symlink() {
-            #[cfg(unix)]
-            {
-                let link = fs::read_link(entry.path())?;
-                std::os::unix::fs::symlink(link, target)?;
-            }
-            #[cfg(windows)]
-            {
-                let link = fs::read_link(entry.path())?;
-                if link.is_dir() {
-                    std::os::windows::fs::symlink_dir(link, target)?;
-                } else {
-                    std::os::windows::fs::symlink_file(link, target)?;
-                }
-            }
+            let link = fs::read_link(entry.path())?;
+            std::os::unix::fs::symlink(link, target)?;
         } else {
             fs::copy(entry.path(), target)?;
         }

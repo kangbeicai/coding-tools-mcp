@@ -1,23 +1,13 @@
-import { invoke as tauriInvoke } from "@tauri-apps/api/core";
-
 interface WebRpcResponse<T> {
   ok: boolean;
   result?: T;
   error?: string;
 }
 
-export function isTauriRuntime(): boolean {
-  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
-}
-
 export async function invokeCommand<T>(
   command: string,
   args: Record<string, unknown> = {},
 ): Promise<T> {
-  if (isTauriRuntime()) {
-    return tauriInvoke<T>(command, args);
-  }
-
   const response = await fetch("/api/rpc", {
     method: "POST",
     headers: { "content-type": "application/json" },

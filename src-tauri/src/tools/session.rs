@@ -484,7 +484,6 @@ pub fn kill_session(store: &SessionStore, args: &Value) -> Result<Value, Workspa
     Ok(tool_ok(payload))
 }
 
-#[cfg(unix)]
 fn send_session_signal(pid: u32, signal: &str) {
     let sig = match signal {
         "KILL" => libc::SIGKILL,
@@ -493,18 +492,5 @@ fn send_session_signal(pid: u32, signal: &str) {
     };
     unsafe {
         libc::kill(pid as i32, sig);
-    }
-}
-
-#[cfg(windows)]
-fn send_session_signal(pid: u32, _signal: &str) {
-    use windows::Win32::Foundation::CloseHandle;
-    use windows::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
-
-    unsafe {
-        if let Ok(handle) = OpenProcess(PROCESS_TERMINATE, false, pid) {
-            let _ = TerminateProcess(handle, 1);
-            let _ = CloseHandle(handle);
-        }
     }
 }

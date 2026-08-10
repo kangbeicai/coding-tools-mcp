@@ -2,8 +2,6 @@
   import ThemeToggle from "$lib/components/ThemeToggle.svelte";
   import { APP_VERSION } from "$lib/app-version";
   import { REPO_URL } from "$lib/app-links";
-  import { openUrl } from "$lib/api/app-info";
-  import { message } from "@tauri-apps/plugin-dialog";
   import { Github } from "@lucide/svelte";
   import type { Snippet } from "svelte";
 
@@ -16,12 +14,8 @@
 
   let { children, sidebar, onAddWorkspace, settingsNav }: Props = $props();
 
-  async function openRepo() {
-    try {
-      await openUrl(REPO_URL);
-    } catch (e) {
-      await message(String(e), { title: "无法打开仓库", kind: "error" });
-    }
+  function openRepo() {
+    window.open(REPO_URL, "_blank", "noopener,noreferrer");
   }
 </script>
 
@@ -31,7 +25,7 @@
       <div class="flex items-start justify-between gap-2">
         <div>
           <p class="tx-brand-kicker">Coding Tools</p>
-          <h1 class="tx-brand-title">桌面控制台</h1>
+          <h1 class="tx-brand-title">Web 控制台</h1>
         </div>
         <ThemeToggle />
       </div>
@@ -55,7 +49,7 @@
         {@render settingsNav()}
         <div class="tx-app-meta">
           <p class="tx-app-version">v{APP_VERSION}</p>
-          <button type="button" class="tx-repo-link" onclick={() => void openRepo()}>
+          <button type="button" class="tx-repo-link" onclick={openRepo}>
             <Github size={12} strokeWidth={2} />
             <span>仓库</span>
           </button>
@@ -65,7 +59,7 @@
       <div class="tx-sidebar-footer">
         <div class="tx-app-meta">
           <p class="tx-app-version">v{APP_VERSION}</p>
-          <button type="button" class="tx-repo-link" onclick={() => void openRepo()}>
+          <button type="button" class="tx-repo-link" onclick={openRepo}>
             <Github size={12} strokeWidth={2} />
             <span>仓库</span>
           </button>

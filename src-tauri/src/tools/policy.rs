@@ -160,7 +160,7 @@ fn merge_default_allowed_commands(configured: &str) -> HashSet<String> {
 }
 
 fn default_workspace_script_extension_set() -> HashSet<String> {
-    [".exe", ".bat", ".cmd", ".ps1"]
+    [".sh"]
         .into_iter()
         .map(str::to_string)
         .collect()
@@ -281,11 +281,7 @@ pub fn validate_command_for_workspace(
 
     let executable = parts[0].trim_start_matches("./");
     let base_name = executable.rsplit(['/', '\\']).next().unwrap_or(executable);
-    let stem = base_name
-        .strip_suffix(".exe")
-        .or_else(|| base_name.strip_suffix(".cmd"))
-        .or_else(|| base_name.strip_suffix(".bat"))
-        .unwrap_or(base_name);
+    let stem = base_name;
 
     let workspace_entry_candidate = workspace_local_entry_exists(workspace, arguments, executable)
         || executable.contains(['/', '\\'])

@@ -13,8 +13,7 @@ pub(crate) use client::{
     managed_frpc_config_matches, probe_local_mcp_ok, probe_public_mcp_endpoint,
     read_frpc_log_tail, spawn_frpc_config, stop_recorded_frpc_instance, PublicMcpProbe,
 };
-pub(crate) use client::{cached_frpc_path, download_frpc_to_cache};
-pub use client::{resolve_frpc, spawn_frpc};
+pub use client::spawn_frpc;
 
 const FRP_VERSION: &str = "0.61.2";
 pub(crate) const VERSION: &str = FRP_VERSION;

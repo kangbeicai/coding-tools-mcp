@@ -156,12 +156,6 @@
       </p>
     </section>
 
-    <section class="tx-card p-5">
-      <h2 class="text-[15px] font-semibold">Web Console 迁移状态</h2>
-      <p class="mt-2 text-sm leading-6 text-[var(--color-text-muted)]">
-        Web 模式目前优先管理全局 Gateway、会话路由和工作区基础策略。旧的每工作区 MCP、Actions、FRP 与桌面专用文件选择仍保留在 Tauri 兼容界面，后续会逐步迁移到统一 Admin API。
-      </p>
-    </section>
   {:else}
     <section class="tx-card p-5">
       <h1 class="text-lg font-semibold">找不到工作区</h1>

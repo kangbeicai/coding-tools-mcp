@@ -99,6 +99,7 @@ pub fn validate_workspace_resources_update(
     validate_changed_candidate_subdomains(&existing_claims, &candidate_claims, current, candidate)
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn validate_service_start(
     profiles: &[WorkspaceProfile],
     workspace_id: &str,

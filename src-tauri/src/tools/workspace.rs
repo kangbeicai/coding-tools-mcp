@@ -365,8 +365,7 @@ impl Workspace {
         include_ignored: bool,
     ) -> bool {
         let Ok(scan_path) = path.strip_prefix(&self.root) else {
-            // Workspace 外的读取路径不套用 Workspace 内部的隐藏/构建目录过滤，
-            // 否则 Windows 临时目录等路径会被误判为隐藏目录而无法读取。
+            // Workspace 外的读取路径不套用 Workspace 内部的隐藏/构建目录过滤。
             return false;
         };
         let parts: Vec<String> = scan_path
@@ -409,15 +408,6 @@ pub fn relative_display(root: &Path, path: &Path) -> String {
         .strip_prefix(root)
         .map(|p| p.to_string_lossy().replace('\\', "/"))
         .unwrap_or_else(|_| path.to_string_lossy().replace('\\', "/"));
-    #[cfg(windows)]
-    {
-        if let Some(unc) = display.strip_prefix("//?/UNC/") {
-            return format!("//{unc}");
-        }
-        if let Some(normal) = display.strip_prefix("//?/") {
-            return normal.to_string();
-        }
-    }
     display
 }
 

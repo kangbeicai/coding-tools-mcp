@@ -1,6 +1,6 @@
 # 设计指南索引
 
-Coding Tools MCP Desktop 设计系统文档集。
+Coding Tools MCP Web Console 设计系统文档集。
 
 ## 文档列表
 
@@ -13,7 +13,7 @@ Coding Tools MCP Desktop 设计系统文档集。
 
 - [设计系统主文档](../design-system.md)
 - [设计 Token JSON](../design-system.json)
-- [功能 UI 规格](../specs/rust-desktop-client/ui-design.md)
+- [Headless-only 设计](../specs/linux-headless-only/design.md)
 
 ---
 *返回: [design-system.md](../design-system.md)*

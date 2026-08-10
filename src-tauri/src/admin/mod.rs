@@ -1,10 +1,10 @@
-//! Local Web management plane for headless and desktop deployments.
+//! Local Web management plane for Linux server deployments.
 //!
 //! The admin listener is deliberately separate from the public MCP gateway.
 //! In headless/manual-run deployments it defaults to all IPv4 interfaces so
 //! the Web Console can be opened directly from a trusted LAN. It serves both
 //! the static Svelte application and a small JSON RPC surface backed by the
-//! same application state as Tauri.
+//! same application state as the Gateway runtime.
 
 mod listener;
 mod rpc;

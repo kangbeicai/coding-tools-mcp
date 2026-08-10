@@ -1,5 +1,5 @@
-//! Linux/server-oriented entry points that do not require Tauri, WebKit or a
-//! graphical session. Running `coding-tools` with no subcommand starts the
+//! Linux/server-oriented entry points that do not require a graphical session.
+//! Running `coding-tools` with no subcommand starts the
 //! foreground Gateway + Web Console, similar to other developer CLIs.
 
 mod systemd;
@@ -578,9 +578,7 @@ fn print_help() {
     println!();
     println!("Linux headless build:");
     println!("  npm ci && npm run build");
-    println!(
-        "  cargo build --release --no-default-features --features headless --bin coding-tools"
-    );
+    println!("  cargo build --release --manifest-path src-tauri/Cargo.toml --bin coding-tools");
     println!("  The Web Console built above is embedded into the headless binary.");
     println!();
     println!("LAN Web Console:");

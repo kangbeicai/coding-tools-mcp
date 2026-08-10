@@ -511,12 +511,6 @@ fn restore_backups(backups: &HashMap<PathBuf, Option<Vec<u8>>>) {
 }
 
 fn replace_file(temp: &PathBuf, path: &PathBuf) -> Result<(), std::io::Error> {
-    #[cfg(windows)]
-    {
-        if path.exists() {
-            fs::remove_file(path)?;
-        }
-    }
     fs::rename(temp, path)
 }
 
@@ -539,7 +533,6 @@ fn is_critical_file(path: &str) -> bool {
         || name == "package.json"
         || name == "package-lock.json"
         || name == "pnpm-lock.yaml"
-        || name == "tauri.conf.json"
         || name.starts_with("README")
         || name.starts_with("LICENSE")
         || name.starts_with("vite.config.")

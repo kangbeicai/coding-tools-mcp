@@ -4,19 +4,11 @@ use std::path::{Path, PathBuf};
 pub fn resolve_from_path(name: &str) -> Option<PathBuf> {
     let path_var = env::var_os("PATH")?;
     let paths = env::split_paths(&path_var);
-    let windows = cfg!(windows);
-    let candidates = if windows {
-        vec![name.to_string(), format!("{name}.exe")]
-    } else {
-        vec![name.to_string()]
-    };
 
     for dir in paths {
-        for candidate in &candidates {
-            let full = dir.join(candidate);
-            if full.is_file() {
-                return Some(full);
-            }
+        let full = dir.join(name);
+        if full.is_file() {
+            return Some(full);
         }
     }
     None

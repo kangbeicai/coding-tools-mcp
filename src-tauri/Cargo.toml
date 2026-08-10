@@ -1,36 +1,20 @@
 [package]
-name = "coding-tools-mcp-desktop"
+name = "coding-tools-mcp"
 version = "0.1.33"
-description = "Coding Tools MCP desktop client"
+description = "Linux Coding Tools MCP Gateway and Web Console"
 authors = ["Coding Tools MCP Contributors"]
 edition = "2021"
 autobins = false
 
-[features]
-default = ["desktop"]
-desktop = ["dep:tauri", "dep:tauri-plugin-dialog"]
-headless = []
-
 [lib]
-name = "coding_tools_mcp_desktop_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
-
-[[bin]]
-name = "coding-tools-mcp-desktop"
-path = "src/main.rs"
-required-features = ["desktop"]
+name = "coding_tools_mcp"
+crate-type = ["rlib"]
 
 [[bin]]
 name = "coding-tools"
 path = "src/bin/coding-tools.rs"
-required-features = ["headless"]
-
-[build-dependencies]
-tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [], optional = true }
-tauri-plugin-dialog = { version = "2", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 uuid = { version = "1", features = ["v4"] }
@@ -50,7 +34,6 @@ sha2 = "0.10"
 shlex = "1"
 shell-words = "1"
 which = "7"
-zip = "2"
 flate2 = "1"
 tar = "0.4"
 fs2 = "0.4"
@@ -58,19 +41,5 @@ fs2 = "0.4"
 [dev-dependencies]
 tempfile = "3"
 
-[target.'cfg(windows)'.dependencies]
-windows = { version = "0.61", features = [
-    "Win32_Foundation",
-    "Win32_NetworkManagement_IpHelper",
-    "Win32_Networking_WinSock",
-    "Win32_Security",
-    "Win32_Storage_FileSystem",
-    "Win32_System_Diagnostics_ToolHelp",
-    "Win32_System_ProcessStatus",
-    "Win32_System_Threading",
-    "Win32_UI_Shell",
-    "Win32_UI_Shell_Common",
-] }
-
-[target.'cfg(unix)'.dependencies]
+[target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2"

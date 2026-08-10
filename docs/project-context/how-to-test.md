@@ -1,76 +1,34 @@
-# 如何编写测试
+# 如何测试
 
-> 本文档描述 Coding Tools MCP Rust 的测试策略。
+## 必跑检查
 
-## 概述
+```bash
+npm run check
+npm run build
+cargo check --manifest-path src-tauri/Cargo.toml --all-targets
+cargo test --manifest-path src-tauri/Cargo.toml --all-targets
+cargo build --release --manifest-path src-tauri/Cargo.toml --bin coding-tools
+```
 
-测试分三层：Rust 单元测试、MCP 合规测试（从旧版移植）、端到端集成测试。
+## 测试层级
 
-## 测试框架
-
-| 层级 | 框架 | 位置 |
+| 层级 | 位置 | 覆盖 |
 |------|------|------|
-| Rust 单元测试 | cargo test | `src-tauri/src/**` 内 `#[cfg(test)]` |
-| Rust 集成测试 | cargo test | `src-tauri/tests/` |
-| MCP 合规测试 | cargo test | `tests/compliance/` |
-| 前端测试 | vitest | `src/**/*.test.ts` |
+| Rust 单元测试 | `src-tauri/src/**` | URL、OAuth、配置、路由、隧道和工具函数 |
+| Rust 集成测试 | `src-tauri/tests/` | 工具契约、安全边界、Harness、History |
+| 前端静态检查 | `npm run check` | Svelte 与 TypeScript |
+| 前端生产构建 | `npm run build` | SPA route 与 embedded assets 输入 |
+| 运行态 smoke | 隔离端口启动 release | Web、RPC、Gateway、health、shutdown |
+| 公网回归 | FRP/Cloudflare 环境 | effective URL、canonical URL、OAuth metadata |
 
-## MCP 合规测试（核心）
+## 运行态原则
 
-旧版 `old/tests/compliance/` 包含 71 项测试，覆盖：
+- 新 release 先使用隔离 Gateway/Admin 端口启动。
+- 验证 `/`、`/api/rpc`、`/mcp` 和 OAuth metadata。
+- Named Tunnel 回归需要确认 Gateway restart 不无故重建 exposure PID/URL。
+- 验证 SIGINT 后 listener 和受管子进程正常退出。
+- 不用未验证 binary 替换当前线上进程。
 
-- MCP 协议契约（initialize, tools/list, tools/call）
-- 工具行为 golden test（read_file, apply_patch, exec_command 等）
-- 安全边界（路径穿越、敏感环境变量、破坏性命令）
-- Schema drift（工具定义与文档一致）
-- 端到端场景（bugfix、stdin 交互）
+## 安全回归
 
-### 移植策略
-
-1. Phase 1：移植 P0 工具的 golden tests
-2. Phase 2：移植安全测试和 schema drift
-3. Phase 3：移植完整 71 项合规套件
-
-### 合规测试运行
-
-```bash
-# 运行全部合规测试
-cargo test --test compliance
-
-# 运行单个套件
-cargo test --test compliance -- mcp_contract
-```
-
-## Rust 单元测试示例
-
-```rust
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn workspace_profile_endpoint() {
-        let profile = WorkspaceProfile::new("/tmp/repo", "test");
-        assert_eq!(profile.local_endpoint(), "http://127.0.0.1:28766/mcp");
-    }
-}
-```
-
-## 测试编写原则
-
-1. **行为契约优先** — 以 `old/docs/profile-v0.1.md` 为准，不猜测
-2. **先移植再扩展** — 旧版合规测试是回归基线
-3. **安全测试不可跳过** — 路径穿越、命令注入等必须覆盖
-4. **Windows 兼容** — 进程管理和路径处理需在 Windows 上验证
-
-## 旧版测试参考
-
-```bash
-# 旧版 Python 合规测试
-cd old && make compliance
-```
-
-当前基线：`old/reports/compliance/latest.md` — 71 项全 PASS。
-
----
-*返回索引: [../project-context.md](../project-context.md)*
+`call_tool_security` 与相关 policy 测试不可跳过，重点覆盖 Workspace 路径边界、`.git/.github` 保护、shell chaining、危险命令确认和外部写入阻止。

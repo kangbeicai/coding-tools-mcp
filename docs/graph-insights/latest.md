@@ -1,90 +1,62 @@
 # 项目图谱洞察
 
-更新时间：2026-07-13
+更新时间：2026-08-10
 
-## 分析状态
+## 当前架构
 
-- GitNexus 索引已刷新：5,338 个节点、10,793 条边、300 条执行流。
-- 当前索引对本仓库 Rust 符号的查询仍不稳定，`start_runtime`、`RuntimeSupervisor`、`call_tool` 等目标未能可靠解析。
-- 以下结构结论以当前源码和项目文档为准，GitNexus 仅作为辅助索引。
-
-## 项目定位
-
-这是一个 Rust + Tauri 2 + Svelte 的桌面客户端，将 Coding Tools MCP 能力以内嵌 HTTP 服务形式暴露，并同时提供 ChatGPT Actions OpenAPI 网关。每个工作区可以独立运行 MCP 服务、Actions 服务和 FRP/Cloudflare 隧道。
-
-## 主执行链路
+项目已收敛为 Linux-only 单进程产品：
 
 ```text
-Svelte 页面
-  → src/lib/api/* 的 Tauri invoke
-  → src-tauri/src/commands/*
-  → AppState
-      ├─ DataStore：工作区、设置和密钥数据
-      └─ RuntimeSupervisor：MCP/Actions 生命周期
-            ├─ mcp::spawn_listener：/mcp
-            └─ actions::spawn_listener：/openapi.json、/actions/{tool}
-  → tunnel supervisor：FRP / Cloudflare 公网隧道
+Browser Web Console
+  -> POST /api/rpc
+  -> Admin listener
+
+MCP Client / ChatGPT
+  -> /mcp or /w/<workspace-id>/mcp
+  -> Global Gateway
+  -> session -> workspace
+  -> ToolContext
+
+coding-tools
+  -> Tokio/Axum runtime
+  -> optional FRP/cloudflared children
 ```
 
-## 核心模块
+Tauri desktop binary、commands、配置、assets、Windows/macOS platform 实现和桌面 release workflows 已删除。Rust crate 虽继续位于 `src-tauri/`，但不再依赖 Tauri。
 
-### 应用入口与状态
+## 高影响边界
 
-- `src-tauri/src/lib.rs` 注册 Tauri 插件、`AppState` 和全部 IPC commands。
-- `src-tauri/src/app_state.rs` 以两个 `Mutex` 管理 `DataStore` 与 `RuntimeSupervisor`。
-- `src-tauri/src/commands/mod.rs` 聚合工作区、运行时、隧道、密钥、软件和设置命令。
+- Web `invokeCommand` 是所有保留管理页面的 transport 汇合点，已统一为 `/api/rpc`。
+- `async_runtime::spawn` 仍位于 Gateway、listener、session 和 tunnel 生命周期关键路径，保留纯 Tokio 实现。
+- `spawn_cloudflare_tunnel` 同时服务 Gateway exposure 与旧 Workspace runtime tunnel supervisor。
+- `spawn_frpc`/`spawn_frpc_config` 覆盖 Workspace 聚合 FRP 与 Gateway FRP。
+- `validate_command_for_workspace` 是所有 `exec_command` 的安全策略入口，Linux 默认已删除 Windows command/script allowlist。
 
-### 数据与工作区
+## 本轮影响评估
 
-- `src-tauri/src/data/store.rs` 负责统一数据文件的读取、迁移、保存及工作区 CRUD。
-- `src-tauri/src/data/model.rs` 的 `AppData` 聚合 FRP 配置、代理、下载配置、工作区和 secrets。
-- `src-tauri/src/workspace/` 定义工作区模型、旧版导入和兼容层。
+| 范围 | 风险 | 结论 |
+|------|------|------|
+| Browser transport | Critical | 统一 RPC 后通过前端 check/build 与运行态 RPC 验证 |
+| Rust crate rename | High | 仅 CLI 和仓库内测试引用，已原子更新并全量编译 |
+| Exec policy defaults | High | 影响所有命令执行，24 项 security tests 与 contract tests 全通过 |
+| Tunnel platform cleanup | Medium | Gateway/Workspace 两条 exposure 路径均编译并通过现有隧道测试 |
+| Docs/workflows/assets | Low | 不影响运行时 |
 
-### 运行时
+## 验证证据
 
-- `src-tauri/src/runtime/supervisor.rs` 以 `(workspace_id, ServiceKind)` 管理 MCP/Actions 状态。
-- 生命周期为 `Stopped → Starting → Running/ Error → Stopping`。
-- `src-tauri/src/commands/runtime.rs` 负责端口占用检查、启动/停止、隧道联动及公网 URL 回写。
-- `src-tauri/src/runtime/port.rs` 和 `src-tauri/src/platform/windows/net.rs` 提供端口与进程检测。
+- `npm run check`：0 errors、0 warnings。
+- `npm run build`：通过，静态 Web Console 写入 `build/`。
+- `cargo test --manifest-path src-tauri/Cargo.toml --all-targets`：184 项通过。
+- 隔离 release 构建：`/tmp/opencode/coding-tools-headless-target/release/coding-tools`。
+- 临时配置和端口 smoke：Web `/`、`POST /api/rpc`、Gateway `/mcp` HTTP 200，SIGINT 正常退出。
+- 生产旧进程和 Named Tunnel 未被替换，固定公网 `/mcp` 仍 HTTP 200。
 
-### HTTP 服务
+## GitNexus 状态
 
-- `src-tauri/src/mcp/listener.rs` 启动 MCP Streamable HTTP 服务，并接入 Bearer/OAuth/无认证。
-- `src-tauri/src/actions/listener.rs` 生成 OpenAPI 文档，暴露 Actions 执行端点和 OAuth 端点。
-- 两个 listener 都复用 `src-tauri/src/tools/` 的工具内核和策略配置。
+本轮调用 GitNexus managed runtime 时，`onnxruntime-node` 下载因 HTTP 302 安装失败；`gitnexus_detect_changes` 在当前 MCP Probe CLI 中不可用。已使用现有图谱结论、直接调用点搜索、全量编译/测试和运行态 smoke 作为降级证据。提交前若 GitNexus runtime 恢复，仍应补跑 detect-changes。
 
-### 隧道
+## 剩余风险
 
-- `src-tauri/src/tunnel/supervisor.rs` 统一管理隧道生命周期。
-- `src-tauri/src/tunnel/frp/` 负责 FRP 配置与客户端。
-- `src-tauri/src/tunnel/cloudflare.rs` 负责 cloudflared 进程和公网 URL 处理。
-
-### 前端
-
-- `src/routes/+layout.svelte` 加载工作区、刷新 MCP/Actions 状态并承载全局导航和 Toast。
-- `src/routes/workspace/[id]/+page.svelte` 是核心工作区页面，管理两个服务、认证、策略、隧道、日志和健康检查。
-- `src/lib/api/` 封装 Tauri IPC；`src/lib/components/` 提供配置表单和状态面板；`src/lib/stores/` 管理前端共享状态。
-
-## 当前工作区观察
-
-- 当前有 52 个已修改文件，另有若干新增文件，改动集中在 OAuth、运行时、隧道、数据存储及 UI。
-- Rust `cargo check` 通过，但有 16 个 unused/dead-code 警告，表明旧的 `settings::store`、`workspace::store` 和 `secret::keyring_store` 抽象尚未完全清理或接回。
-- 当前 `Cargo.toml` 已移除 `keyring` 依赖，但 `DataStore` 将 `shared_secrets`、`workspace_secrets` 和 `app_secrets` 写入 `data/profiles.json`。这与文档中“系统钥匙串存储密钥”的设计目标不一致，应在发布前明确这是临时迁移方案还是需要恢复 OS keyring。
-- `docs/project-context/architecture.md` 仍描述“尚无 Rust 源码或 Tauri 工程”，已经落后于实际仓库，需要后续同步。
-
-## 验证结果
-
-- `rtk cargo check --manifest-path src-tauri/Cargo.toml`：通过，16 个警告。
-- `rtk cargo test --manifest-path src-tauri/Cargo.toml --no-run`：通过，测试目标可编译。
-- `rtk npm run check`：通过，0 错误、0 警告。
-- `rtk npm run build`：通过，SvelteKit/Vite 生产构建成功。
-
-## 建议优先级
-
-1. 先决定 secrets 的最终存储边界：恢复系统钥匙串，或明确加密文件方案并补迁移/权限测试。
-2. 清理未使用的兼容层，避免 `DataStore` 与 `SecretStore` 两套 API 继续并存。
-3. 将 `docs/project-context/architecture.md`、`how-to-test.md` 与实际 Tauri 工程同步。
-4. 补充 MCP/Actions/tunnel 的运行时集成测试，尤其是端口冲突、停止等待、OAuth 回调和隧道自动启动失败场景。
-
----
-*来源：当前源码、README、项目上下文文档、Git 状态与构建验证；GitNexus 索引作为辅助。*
+- 生产进程运行在已 abandoned 的 SSH session scope，不属于 `coding-tools.service`；未明确安全重启方式前不自动替换。
+- 保留的配置目录名 `coding-tools-mcp-desktop` 是已有数据兼容边界，不代表仍有桌面 runtime。
+- Web Admin 尚无独立管理员认证，必须限制在可信 LAN/VPN/防火墙后。

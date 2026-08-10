@@ -223,8 +223,7 @@ pub(crate) async fn stop_recorded_frpc_instance(workspace_id: &str) -> AppResult
         return Ok(false);
     }
 
-    // Soft terminate, then escalate with retries. A single TerminateProcess can
-    // leave frpc alive long enough on Windows to fail the whole MCP stop.
+    // Soft terminate, then escalate with retries.
     let soft_deadline = tokio::time::Instant::now() + Duration::from_secs(2);
     let _ = platform().terminate_process_tree(pid);
     while platform().is_process_alive(pid) && tokio::time::Instant::now() < soft_deadline {
@@ -235,17 +234,8 @@ pub(crate) async fn stop_recorded_frpc_instance(workspace_id: &str) -> AppResult
         let force_deadline = tokio::time::Instant::now() + Duration::from_secs(3);
         while platform().is_process_alive(pid) && tokio::time::Instant::now() < force_deadline {
             let _ = platform().terminate_process_tree(pid);
-            // Also match by image path in case the PID was recycled or the
-            // process tree root no longer owns child frpc workers.
-            let _ = platform().terminate_processes_by_image_path(Path::new(recorded_image));
             sleep(Duration::from_millis(100)).await;
         }
-    }
-
-    if platform().is_process_alive(pid) {
-        // Last resort: kill every process running our managed frpc binary.
-        let _ = platform().terminate_processes_by_image_path(Path::new(recorded_image));
-        sleep(Duration::from_millis(200)).await;
     }
 
     if platform().is_process_alive(pid) {
@@ -261,16 +251,7 @@ pub(crate) async fn stop_recorded_frpc_instance(workspace_id: &str) -> AppResult
 fn same_process_image(left: &Path, right: &Path) -> bool {
     let left = std::fs::canonicalize(left).unwrap_or_else(|_| left.to_path_buf());
     let right = std::fs::canonicalize(right).unwrap_or_else(|_| right.to_path_buf());
-    #[cfg(windows)]
-    {
-        left.to_string_lossy()
-            .trim_start_matches("\\\\?\\")
-            .eq_ignore_ascii_case(right.to_string_lossy().trim_start_matches("\\\\?\\"))
-    }
-    #[cfg(not(windows))]
-    {
-        left == right
-    }
+    left == right
 }
 
 pub async fn spawn_frpc(
@@ -314,19 +295,7 @@ pub async fn spawn_frpc(
     cmd.stderr(std::process::Stdio::piped());
     cmd.current_dir(&first_profile.path);
 
-    #[cfg(windows)]
-    {
-        const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        // frpc 是控制台程序。显式禁止创建控制台，避免安装版或开发版
-        // 从桌面应用启动时短暂闪出黑色窗口。
-        cmd.creation_flags(CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW);
-    }
-
-    #[cfg(unix)]
-    {
-        cmd.process_group(0);
-    }
+    cmd.process_group(0);
 
     // 一个聚合 frpc 只有一套进程环境，不能按工作区分别设置代理。
     // 任一路由要求使用代理时，为整个聚合连接启用代理；这样 HashMap
@@ -401,17 +370,7 @@ pub(crate) async fn spawn_frpc_config(
     cmd.stderr(std::process::Stdio::piped());
     cmd.current_dir(cwd);
 
-    #[cfg(windows)]
-    {
-        const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        cmd.creation_flags(CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW);
-    }
-
-    #[cfg(unix)]
-    {
-        cmd.process_group(0);
-    }
+    cmd.process_group(0);
 
     if use_proxy {
         crate::tunnel::cloudflare::apply_proxy_env(&mut cmd, &settings.proxy);
@@ -488,9 +447,6 @@ fn validate_frp_config(config: &FrpServerConfig) -> AppResult<()> {
 fn bundled_frpc() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let dir = exe.parent()?;
-    #[cfg(windows)]
-    let names = ["frpc.exe"];
-    #[cfg(not(windows))]
     let names = ["frpc"];
     for name in names {
         let candidate = dir.join(name);
@@ -509,14 +465,7 @@ pub(crate) fn cached_frpc_path() -> Option<PathBuf> {
 }
 
 pub(crate) fn frpc_binary_name() -> &'static str {
-    #[cfg(windows)]
-    {
-        "frpc.exe"
-    }
-    #[cfg(not(windows))]
-    {
-        "frpc"
-    }
+    "frpc"
 }
 
 pub(crate) fn frpc_log_name(kind: TunnelServiceKind) -> &'static str {
@@ -869,13 +818,8 @@ pub(crate) async fn download_frpc_to_cache() -> AppResult<PathBuf> {
         std::fs::create_dir_all(parent)?;
     }
 
-    if archive_name.ends_with(".zip") {
-        extract_frpc_from_zip(&archive_path, &dest, binary_in_archive)?;
-    } else {
-        extract_frpc_from_tar_gz(&archive_path, &dest, binary_in_archive)?;
-    }
+    extract_frpc_from_tar_gz(&archive_path, &dest, binary_in_archive)?;
 
-    #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         if let Ok(meta) = std::fs::metadata(&dest) {
@@ -890,26 +834,6 @@ pub(crate) async fn download_frpc_to_cache() -> AppResult<PathBuf> {
     } else {
         Err(AppError::Message("frpc 自动安装失败。".into()))
     }
-}
-
-fn extract_frpc_from_zip(archive_path: &Path, dest: &Path, binary_suffix: &str) -> AppResult<()> {
-    let file = std::fs::File::open(archive_path)?;
-    let mut archive = zip::ZipArchive::new(file)
-        .map_err(|err| AppError::Message(format!("解压 frpc 安装包失败: {err}")))?;
-    for i in 0..archive.len() {
-        let mut entry = archive
-            .by_index(i)
-            .map_err(|err| AppError::Message(format!("读取 frpc 安装包失败: {err}")))?;
-        let name = entry.name().replace('\\', "/");
-        if name.ends_with(binary_suffix) || name.ends_with("frpc") || name.ends_with("frpc.exe") {
-            let mut out = std::fs::File::create(dest)?;
-            std::io::copy(&mut entry, &mut out)?;
-            return Ok(());
-        }
-    }
-    Err(AppError::Message(
-        "frpc 安装包中未找到 frpc 可执行文件。".into(),
-    ))
 }
 
 fn extract_frpc_from_tar_gz(
@@ -943,33 +867,15 @@ fn extract_frpc_from_tar_gz(
 }
 
 fn frp_release_asset() -> AppResult<(&'static str, &'static str)> {
-    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
-    {
-        Ok(("frp_0.61.2_windows_amd64.zip", "frpc.exe"))
-    }
-    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    #[cfg(target_arch = "x86_64")]
     {
         Ok(("frp_0.61.2_linux_amd64.tar.gz", "frpc"))
     }
-    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+    #[cfg(target_arch = "aarch64")]
     {
         Ok(("frp_0.61.2_linux_arm64.tar.gz", "frpc"))
     }
-    #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
-    {
-        Ok(("frp_0.61.2_darwin_amd64.tar.gz", "frpc"))
-    }
-    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-    {
-        Ok(("frp_0.61.2_darwin_arm64.tar.gz", "frpc"))
-    }
-    #[cfg(not(any(
-        all(target_os = "windows", target_arch = "x86_64"),
-        all(target_os = "linux", target_arch = "x86_64"),
-        all(target_os = "linux", target_arch = "aarch64"),
-        all(target_os = "macos", target_arch = "x86_64"),
-        all(target_os = "macos", target_arch = "aarch64"),
-    )))]
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
     {
         Err(AppError::Message("当前平台暂不支持自动下载 frpc。".into()))
     }

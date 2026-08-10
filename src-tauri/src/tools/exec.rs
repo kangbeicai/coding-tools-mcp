@@ -1,9 +1,6 @@
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-#[cfg(windows)]
-use std::os::windows::process::CommandExt;
-
 use serde_json::{json, Value};
 use tokio::process::Command;
 
@@ -243,12 +240,6 @@ async fn run_command(
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
 
-    #[cfg(windows)]
-    command
-        .env("PYTHONUTF8", "1")
-        .env("PYTHONIOENCODING", "utf-8")
-        .env("PYTHONLEGACYWINDOWSSTDIO", "0");
-
     let child = command.spawn().map_err(|e| WorkspaceError::ToolDetails {
         code: "COMMAND_SPAWN_FAILED",
         message: format!("Failed to start command: {e}"),
@@ -363,9 +354,6 @@ fn schedule_session_eviction(sessions: Arc<SessionStore>, session_id: String) {
 pub fn exec_health_check(ctx: &ToolContext) -> Result<Value, WorkspaceError> {
     let start = Instant::now();
     let cwd = ctx.workspace.root().to_path_buf();
-    #[cfg(windows)]
-    let probe = r#"cmd.exe /d /c "echo exec-health && echo exec-health-stderr 1>&2""#;
-    #[cfg(not(windows))]
     let probe = r#"sh -c "printf exec-health; printf exec-health-stderr >&2""#;
 
     let result = crate::async_runtime::block_on(run_command(
@@ -663,11 +651,11 @@ mod tests {
     #[test]
     fn resolves_an_arbitrarily_named_workspace_local_entry() {
         let workspace = tempdir().expect("workspace");
-        let entry = workspace.path().join("scripts").join("anything.cmd");
+        let entry = workspace.path().join("scripts").join("anything.sh");
         std::fs::create_dir_all(entry.parent().expect("parent")).expect("scripts");
         std::fs::write(&entry, "echo test").expect("entry");
         let resolved = resolve_program(
-            "scripts/anything.cmd",
+            "scripts/anything.sh",
             workspace.path(),
             workspace.path(),
             &crate::tools::policy::PolicySettings::default(),
@@ -679,137 +667,6 @@ mod tests {
         );
     }
 
-    #[cfg(windows)]
-    #[test]
-    fn windows_hidden_creation_flags_match_frpc_no_window_pattern() {
-        assert_eq!(
-            windows_hidden_creation_flags(),
-            0x0000_0200 | 0x0800_0000,
-            "must keep CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW"
-        );
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn windows_scripts_use_their_platform_runners() {
-        let batch = command_for_program("C:/workspace/run-anything.cmd", &[]);
-        assert_eq!(batch.as_std().get_program().to_string_lossy(), "cmd.exe");
-        assert!(batch.as_std().get_args().any(|arg| arg == "/c"));
-        assert_eq!(
-            windows_batch_command_line(
-                r"\\?\C:\workspace\Life Brain\run & tooling.cmd",
-                &["argument & value".to_string()]
-            ),
-            r#"call "C:\workspace\Life Brain\run & tooling.cmd" "argument & value""#
-        );
-
-        let script = command_for_program("C:/workspace/run-anything.ps1", &[]);
-        let runner = script
-            .as_std()
-            .get_program()
-            .to_string_lossy()
-            .to_ascii_lowercase();
-        assert!(runner.contains("powershell") || runner.contains("pwsh"));
-        assert!(script.as_std().get_args().any(|arg| arg == "-File"));
-
-        // Ensure console-subsystem programs (python.exe) also go through the
-        // hidden-window flag path; Command does not expose creation_flags for
-        // direct assertion, so this only verifies construction still succeeds.
-        let python = command_for_program("C:/Python312/python.exe", &["-c".into(), "print(1)".into()]);
-        assert_eq!(
-            python.as_std().get_program().to_string_lossy(),
-            "C:/Python312/python.exe"
-        );
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn windows_workspace_scripts_and_python_unicode_execute_successfully() {
-        let workspace = tempdir().expect("workspace");
-        let harness = tempdir().expect("harness");
-        std::fs::write(
-            workspace.path().join("any-name.cmd"),
-            "@echo tooling-cmd-ok\r\n",
-        )
-        .expect("cmd script");
-        std::fs::write(
-            workspace.path().join("any-name.ps1"),
-            "Write-Output 'tooling-powershell-ok'\r\n",
-        )
-        .expect("powershell script");
-        std::fs::write(
-            workspace.path().join("workflow_probe.py"),
-            "print('workflow-ok')\n",
-        )
-        .expect("python module");
-        let ctx =
-            ToolContext::for_test(workspace.path().to_path_buf(), harness.path().to_path_buf())
-                .expect("context");
-
-        for command in [
-            "any-name.cmd",
-            "any-name.ps1",
-            "cmd /c echo tooling-cmd-ok",
-            "powershell -NoProfile -Command \"Write-Output tooling-powershell-ok\"",
-            "python -c \"print('中文输出正常 ✅')\"",
-        ] {
-            let output = call_tool(
-                &ctx,
-                "exec_command",
-                &json!({ "cmd": command, "timeout_ms": 10_000, "yield_time_ms": 10_000 }),
-            );
-            assert_eq!(output["ok"], true, "{command}: {output}");
-            assert_eq!(output["command_ok"], true, "{command}: {output}");
-        }
-
-        for _ in 0..10 {
-            let output = call_tool(
-                &ctx,
-                "exec_command",
-                &json!({ "cmd": "python -m workflow_probe", "timeout_ms": 10_000 }),
-            );
-            assert_eq!(output["command_ok"], true, "{output}");
-            assert!(output["stdout"]
-                .as_str()
-                .unwrap_or_default()
-                .contains("workflow-ok"));
-        }
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn windows_batch_scripts_preserve_space_paths_and_arguments() {
-        let parent = tempdir().expect("workspace parent");
-        let workspace = parent.path().join("Life Brain 中文");
-        std::fs::create_dir_all(&workspace).expect("workspace");
-        let harness = tempdir().expect("harness");
-        let ctx = ToolContext::for_test(workspace.clone(), harness.path().to_path_buf())
-            .expect("context");
-
-        for extension in ["cmd", "bat"] {
-            let script_name = format!("run & tooling.{extension}");
-            std::fs::write(
-                workspace.join(&script_name),
-                "@echo off\r\nif not \"%~1\"==\"argument & value\" exit /b 7\r\necho tooling-space-path-ok\r\n",
-            )
-            .expect("batch script");
-
-            let command = format!(r#""{script_name}" "argument & value""#);
-            let output = call_tool(
-                &ctx,
-                "exec_command",
-                &json!({ "cmd": command, "timeout_ms": 10_000, "yield_time_ms": 10_000 }),
-            );
-            assert_eq!(output["command_ok"], true, "{script_name}: {output}");
-            let stdout = output["stdout"].as_str().unwrap_or_default();
-            assert!(
-                stdout.contains("tooling-space-path-ok"),
-                "{script_name}: {output}"
-            );
-        }
-    }
-
-    #[cfg(unix)]
     #[test]
     fn unix_workspace_scripts_preserve_space_paths_and_arguments() {
         use std::os::unix::fs::PermissionsExt;
@@ -848,88 +705,12 @@ mod tests {
     }
 }
 
-#[cfg(windows)]
-fn windows_hidden_creation_flags() -> u32 {
-    // Match frpc/cloudflared: hide console-subsystem children (python/cmd/powershell)
-    // so remote exec_command does not flash a console or steal focus.
-    const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
-    const CREATE_NO_WINDOW: u32 = 0x08000000;
-    CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW
-}
-
 fn command_for_program(program: &str, args: &[String]) -> Command {
-    #[cfg(windows)]
-    {
-        let extension = Path::new(program)
-            .extension()
-            .and_then(|value| value.to_str())
-            .map(str::to_ascii_lowercase);
-        match extension.as_deref() {
-            Some("bat") | Some("cmd") => {
-                let mut command = Command::new("cmd.exe");
-                command.args(["/d", "/s", "/c"]);
-                command
-                    .as_std_mut()
-                    .raw_arg(windows_batch_command_line(program, args));
-                command.creation_flags(windows_hidden_creation_flags());
-                return command;
-            }
-            Some("ps1") => {
-                let shell = which::which("pwsh")
-                    .or_else(|_| which::which("powershell"))
-                    .unwrap_or_else(|_| std::path::PathBuf::from("powershell.exe"));
-                let mut command = Command::new(shell);
-                command
-                    .args([
-                        "-NoLogo",
-                        "-NoProfile",
-                        "-NonInteractive",
-                        "-ExecutionPolicy",
-                        "Bypass",
-                        "-File",
-                        windows_command_path(program).as_str(),
-                    ])
-                    .args(args);
-                command.creation_flags(windows_hidden_creation_flags());
-                return command;
-            }
-            _ => {}
-        }
-    }
-
     let mut command = Command::new(program);
     command.args(args);
-    #[cfg(windows)]
-    command.creation_flags(windows_hidden_creation_flags());
     command
 }
 
-#[cfg(windows)]
-fn windows_batch_command_line(program: &str, args: &[String]) -> String {
-    let mut command_line = String::from("call ");
-    command_line.push_str(&windows_batch_token(&windows_command_path(program)));
-    for arg in args {
-        command_line.push(' ');
-        command_line.push_str(&windows_batch_token(arg));
-    }
-    command_line
-}
-
-#[cfg(windows)]
-fn windows_batch_token(value: &str) -> String {
-    format!("\"{}\"", value.replace('"', "\"\""))
-}
-
 fn platform_command_path(path: &Path) -> std::path::PathBuf {
-    #[cfg(windows)]
-    {
-        std::path::PathBuf::from(windows_command_path(&path.to_string_lossy()))
-    }
-    #[cfg(not(windows))]
     path.to_path_buf()
-}
-
-#[cfg(windows)]
-fn windows_command_path(path: &str) -> String {
-    path.strip_prefix("\\\\?\\").unwrap_or(path).to_string()
 }

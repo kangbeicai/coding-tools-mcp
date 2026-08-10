@@ -1,6 +1,6 @@
 {
   "version": "1.0.0",
-  "name": "Coding Tools MCP Desktop",
+  "name": "Coding Tools MCP Web Console",
   "productType": "Developer Tool",
   "stack": "svelte",
   "aesthetic": "refined-utilitarian",
