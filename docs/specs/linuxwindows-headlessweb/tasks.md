@@ -53,11 +53,27 @@
   - **涉及文件**: Git metadata（不进入 commit）与上述交付物
   - _需求: FR-5_ ｜ _设计: 测试策略_
 
+### 阶段 4: 修复 fork / 自动触发可观测性
+
+- [x] 4.1 CI 改为 main push / PR 自动运行，并按 Web build -> Rust test/build 顺序验证真实 Headless binary
+  - **证据块**: `src-tauri/build.rs` 在 `build/` 不存在时会生成 0 个 embedded assets，因此 Rust-only 独立 job 不能代表真实发布 binary。
+  - **涉及文件**: `.github/workflows/ci.yml`
+  - _需求: FR-3_ ｜ _设计: 决策 5_
+- [x] 4.2 Release 在相关 main push 上执行三平台 build-only 验证，publish 只允许 v* tag/显式 manual publish
+  - **证据块**: `main` push 现在可验证 Linux x64 / Linux arm64 / Windows x64；`gh release create --verify-tag` 阻止错误 manual 输入隐式造 tag。
+  - **涉及文件**: `.github/workflows/release.yml`
+  - _需求: FR-1, FR-2, FR-3, FR-4_ ｜ _设计: 决策 5_
+- [ ] 4.3 在 GitHub fork 的 Actions 页面启用 workflows，并观察首次远端 run
+  - **证据块**: GitHub 官方文档说明 forked repository 的 workflows 默认不运行，需要在 fork 的 Actions 页面显式启用。
+  - **涉及文件**: GitHub repository setting（不进入 Git）
+  - _需求: FR-1, FR-3_ ｜ _设计: 风险评估_
+
 ## 检查点
 
 - [x] 阶段 1：规格完整并经过 `check_spec`。
 - [x] 阶段 2：workflow 结构已核对，三个 native build job 与 publish dependency 正确。
 - [x] 阶段 3：README/graph 同步，detect-changes、commit、push 完成。
+- [ ] 阶段 4：代码侧自动触发/安全发布逻辑已完成；等待 fork 仓库 Actions 被启用后验证首个远端 run。
 
 ## 需求覆盖矩阵
 

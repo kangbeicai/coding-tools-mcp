@@ -2,34 +2,77 @@ name: Release
 
 on:
   push:
+    branches:
+      - main
     tags:
       - "v*"
+    paths:
+      - ".github/workflows/release.yml"
+      - "package.json"
+      - "package-lock.json"
+      - "src/**"
+      - "static/**"
+      - "src-tauri/**"
+      - "svelte.config.js"
+      - "vite.config.*"
   workflow_dispatch:
     inputs:
-      release_tag:
-        description: "Existing v* tag to rebuild and publish"
+      ref:
+        description: "Branch, tag, or commit to build"
         required: true
+        default: "main"
         type: string
+      publish:
+        description: "Publish a GitHub Release; ref must be an existing v* tag"
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
 
+concurrency:
+  group: release-${{ github.event_name }}-${{ github.ref }}-${{ inputs.ref || 'push' }}
+  cancel-in-progress: false
+
 jobs:
   verify:
     runs-on: ubuntu-24.04
+    outputs:
+      publish: ${{ steps.mode.outputs.publish }}
+      tag: ${{ steps.mode.outputs.tag }}
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref }}
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.ref }}
 
-      - name: Validate release tag
+      - name: Resolve release mode
+        id: mode
         shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          MANUAL_REF: ${{ inputs.ref }}
+          MANUAL_PUBLISH: ${{ inputs.publish }}
         run: |
-          TAG="${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}"
-          if [[ "$TAG" != v* ]]; then
-            echo "Release tag must start with v: $TAG" >&2
-            exit 1
+          publish=false
+          tag=""
+
+          if [[ "$EVENT_NAME" == "push" && "$REF_TYPE" == "tag" ]]; then
+            publish=true
+            tag="$REF_NAME"
+          elif [[ "$EVENT_NAME" == "workflow_dispatch" && "$MANUAL_PUBLISH" == "true" ]]; then
+            if [[ "$MANUAL_REF" != v* ]]; then
+              echo "Manual publish requires ref to be an existing v* tag: $MANUAL_REF" >&2
+              exit 1
+            fi
+            publish=true
+            tag="$MANUAL_REF"
           fi
+
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-node@v6
         with:
@@ -70,7 +113,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref }}
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.ref }}
 
       - uses: actions/setup-node@v6
         with:
@@ -103,18 +146,17 @@ jobs:
           name: ${{ matrix.asset }}
           path: dist/${{ matrix.asset }}
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 7
 
   publish:
-    needs: build
+    needs:
+      - verify
+      - build
+    if: needs.verify.outputs.publish == 'true'
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v6
-        with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref }}
-
       - name: Download release binaries
         uses: actions/download-artifact@v8
         with:
@@ -132,14 +174,16 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.verify.outputs.tag }}
         run: |
-          TAG="${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}"
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" dist/coding-tools-* dist/SHA256SUMS --clobber
           else
             gh release create "$TAG" \
               dist/coding-tools-* \
               dist/SHA256SUMS \
+              --verify-tag \
               --title "Coding Tools MCP $TAG" \
               --generate-notes
           fi
