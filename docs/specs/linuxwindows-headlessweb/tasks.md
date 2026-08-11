@@ -48,7 +48,7 @@
   - **证据块**: README 当前只有源码 build/run，没有 GitHub Release 下载入口；graph insights 仍描述 desktop release workflow 已删除。
   - **涉及文件**: `README.md`, `README.en.md`, `docs/graph-insights/latest.md`
   - _需求: FR-4_ ｜ _设计: 文件结构_
-- [ ] 3.2 验证 workflow 配置、提交并推送 GitHub
+- [x] 3.2 验证 workflow 配置、提交并推送 GitHub
   - **证据块**: 本地 `main` 已跟踪 `github/main`，`forgejo` remote 仍存在。
   - **涉及文件**: Git metadata（不进入 commit）与上述交付物
   - _需求: FR-5_ ｜ _设计: 测试策略_
@@ -57,7 +57,7 @@
 
 - [x] 阶段 1：规格完整并经过 `check_spec`。
 - [x] 阶段 2：workflow 结构已核对，三个 native build job 与 publish dependency 正确。
-- [ ] 阶段 3：README/graph 同步，detect-changes、commit、push 完成。
+- [x] 阶段 3：README/graph 同步，detect-changes、commit、push 完成。
 
 ## 需求覆盖矩阵
 
@@ -67,7 +67,7 @@
 | FR-2 | 2.1 | 已完成 |
 | FR-3 | 2.1 | 已完成 |
 | FR-4 | 2.2, 3.1 | 已完成 |
-| FR-5 | 3.2 | 已满足，待最终复核 |
+| FR-5 | 3.2 | 已完成 |
 
 ## 文件变更清单
 

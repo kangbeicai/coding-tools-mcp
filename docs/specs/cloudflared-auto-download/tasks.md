@@ -59,7 +59,7 @@
 
 - [x] 阶段 1 完成后：规格通过 `check_spec`，所有待改符号完成 GitNexus impact。
 - [x] 阶段 2 完成后：启动 Cloudflare 时会 ensure，配置校验不下载，README 同步。
-- [ ] 阶段 3 完成后：专项/全量测试、release build、diff check、GitNexus detect-changes 全通过。
+- [x] 阶段 3 完成后：专项/全量测试、release build、diff check、GitNexus detect-changes 全通过。
 
 ---
 
