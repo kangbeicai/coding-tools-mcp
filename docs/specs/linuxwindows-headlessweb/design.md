@@ -2,7 +2,7 @@
 
 ## 概述
 
-保留轻量 CI workflow，并让 Release workflow 既承担 tag 发布，也承担 `main` 上的三平台 native build 验证。每个平台独立执行前端生产构建后再执行 Cargo release，从而继续满足 `build.rs` 将 `build/` 静态资源嵌入 `coding-tools` binary 的现有约束。普通 `main` push / PR 自动运行 CI；Release workflow 的 publish job 默认关闭，只有 tag 发布或显式手动 publish 才获得写权限。
+保留轻量 CI workflow 负责 `main` push / PR 的常规回归；Release workflow 只承担 `v*` tag 发布与显式手动三平台验证。每个平台独立执行前端生产构建后再执行 Cargo release，从而继续满足 `build.rs` 将 `build/` 静态资源嵌入 `coding-tools` binary 的现有约束。普通 `main` push 不再自动启动 Release，避免版本提交与紧随其后的 tag 重复消耗三平台 runner。
 
 **对应需求:** FR-1, FR-2, FR-3, FR-4, FR-5
 
@@ -19,7 +19,11 @@
 ### 流程
 
 ```text
-main push / tag v* / workflow_dispatch
+main push / PR --------------------> CI
+                                    npm check + build
+                                    cargo test + release build
+
+tag v* / workflow_dispatch
           |
           v
         verify
@@ -35,14 +39,12 @@ main push / tag v* / workflow_dispatch
           |             |             |
           +------ upload artifacts ---+
                         |
-                        |
               +---------+---------+
               |                   |
               v                   v
-       main/manual dry-run     tag/manual publish
-          artifacts only          publish
-                              SHA256SUMS
-                              gh release create
+       manual dry-run          tag/manual publish
+          artifacts only          SHA256SUMS
+                                  gh release create
 ```
 
 ## 数据模型 / API
@@ -80,13 +82,16 @@ Linux 发布 raw binary，用户下载后执行 `chmod +x`；Windows 发布 `.ex
 
 `CI` 改为 `main` push、PR、manual 都可触发，且顺序固定为前端 check/build -> Rust all-target tests -> release binary build。这样 CI 验证的是实际带内嵌 Web Console 的 Headless binary，而不是在不存在 `build/` 的独立 Rust job 中构建一个 0 embedded assets 的退化产物。
 
-`Release` 也监听影响发布产物的 `main` push，但此时仅 verify/build/upload artifact，不授予 publish job 写权限。真正 Release 只在 `v*` tag push，或 manual dispatch 明确 `publish=true` 且 ref 为已有 `v*` tag 时执行。`gh release create --verify-tag` 防止手动输入错误时隐式创建新 tag。
+`Release` 不监听普通 `main` push。三平台 release build 的非发布验证通过 manual dispatch + `publish=false` 显式执行；真正 Release 只在 `v*` tag push，或 manual dispatch 明确 `publish=true` 且 ref 为已有 `v*` tag 时执行。`gh release create --verify-tag` 防止手动输入错误时隐式创建新 tag。
+
+这是对 `v0.1.34` 首次真实发布的修正：版本 commit 的 `main` push 曾启动 Release #3 build-only，而紧随其后的 tag 又启动 Release #4，造成同一 commit 重复三平台构建并让真正 publish run 排队。常规验证已有 CI 覆盖，因此 Release 的 branch 触发没有额外价值。
 
 ## 测试策略
 
 - 本地验证 YAML 可解析、引用路径存在、`git diff --check` 通过。
 - 现有 Linux `npm check/build`、Rust tests/release build 作为工作流命令基线。
-- fork 仓库先在 GitHub Actions 页面启用 workflows；之后普通 `main` push 应立即产生 CI run，并在相关发布代码变更时产生三平台 Release build 验证。
+- 普通 `main` push 应只自动产生 CI run，不应自动产生 Release run。
+- 需要三平台非发布验证时，手动 dispatch Release，指定目标 ref 且保持 `publish=false`。
 - 推送 workflow 后通过 GitHub Actions 实际 runner 验证 Windows x86_64 与 Linux arm64 native build。
 - 首次发布检查 Release 中三个 binary 和 `SHA256SUMS` 文件名/哈希。
 
@@ -97,7 +102,8 @@ Linux 发布 raw binary，用户下载后执行 `chmod +x`；Windows 发布 `.ex
 | ARM64 hosted runner 可用性变化 | 中 | 使用 GitHub 当前正式公布 runner label；失败时流水线明确报 runner 阶段 |
 | Windows 源码仍有隐藏 cfg 问题 | 高 | Windows native build 作为必须 job，失败阻止 Release |
 | Release token 权限不足 | 中 | workflow 显式设置 `contents: write` |
-| Fork 默认不运行 workflow | 高 | 将“在 fork Actions 页面启用 workflows”列为仓库级前置条件；YAML 无法自行开启 |
+| 仓库级 Actions 被禁用 | 高 | 以远端 CI/Release run 可执行作为发布前置验证；YAML 无法自行开启仓库级开关 |
+| main 与 tag 重复触发 Release | 中 | Release 不监听 branch push；常规 main 验证由 CI 承担，三平台 dry-run 仅手动触发 |
 | Tag 与 Cargo/package 版本不一致 | 低 | 本轮不自动修改版本；发布者负责在打 tag 前完成版本同步 |
 
 ## 检查清单

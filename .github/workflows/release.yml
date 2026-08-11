@@ -2,19 +2,8 @@ name: Release
 
 on:
   push:
-    branches:
-      - main
     tags:
       - "v*"
-    paths:
-      - ".github/workflows/release.yml"
-      - "package.json"
-      - "package-lock.json"
-      - "src/**"
-      - "static/**"
-      - "src-tauri/**"
-      - "svelte.config.js"
-      - "vite.config.*"
   workflow_dispatch:
     inputs:
       ref:
