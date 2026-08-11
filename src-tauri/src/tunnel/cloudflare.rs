@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use std::time::Duration;
 
 #[cfg(windows)]
@@ -6,14 +7,19 @@ use std::os::windows::process::CommandExt;
 
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, Mutex};
 use tokio::time;
+use uuid::Uuid;
 
 use crate::error::{AppError, AppResult};
 use crate::platform::platform;
 use crate::settings::ProxyConfig;
 
 const READY_TIMEOUT: Duration = Duration::from_secs(30);
+const CLOUDFLARED_RELEASE_BASE: &str =
+    "https://github.com/cloudflare/cloudflared/releases/latest/download";
+
+static CLOUDFLARED_DOWNLOAD_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 /// Handle to a supervised `cloudflared` child process.
 pub struct CloudflareTunnelHandle {
@@ -28,11 +34,22 @@ pub fn resolve_cloudflared() -> AppResult<PathBuf> {
         .into_iter()
         .find(|path| path.is_file())
         .or_else(|| cached_cloudflared_path().filter(|path| path.is_file()))
-        .ok_or_else(|| {
-            AppError::Message(
-                "未找到 cloudflared。请安装 Cloudflare Tunnel CLI，或放入应用配置目录的 bin/；Windows 可使用 `winget install Cloudflare.cloudflared`。".into(),
-            )
-        })
+        .ok_or_else(|| AppError::Message("未找到 cloudflared。".into()))
+}
+
+pub async fn ensure_cloudflared() -> AppResult<PathBuf> {
+    if let Ok(path) = resolve_cloudflared() {
+        return Ok(path);
+    }
+
+    let lock = CLOUDFLARED_DOWNLOAD_LOCK.get_or_init(|| Mutex::new(()));
+    let _guard = lock.lock().await;
+
+    if let Ok(path) = resolve_cloudflared() {
+        return Ok(path);
+    }
+
+    download_cloudflared_to_cache().await
 }
 
 /// Path where the app caches a self-managed cloudflared binary.
@@ -52,6 +69,80 @@ pub(crate) fn cloudflared_binary_name() -> &'static str {
     {
         "cloudflared"
     }
+}
+
+fn cloudflared_release_asset(os: &str, arch: &str) -> AppResult<&'static str> {
+    match (os, arch) {
+        ("linux", "x86_64") => Ok("cloudflared-linux-amd64"),
+        ("linux", "aarch64") => Ok("cloudflared-linux-arm64"),
+        ("windows", "x86_64") => Ok("cloudflared-windows-amd64.exe"),
+        _ => Err(AppError::Message(format!(
+            "当前平台暂不支持自动下载 cloudflared: {os}/{arch}"
+        ))),
+    }
+}
+
+async fn download_cloudflared_to_cache() -> AppResult<PathBuf> {
+    let settings = crate::settings::AppSettings::load_or_default();
+    let asset = cloudflared_release_asset(std::env::consts::OS, std::env::consts::ARCH)?;
+    let url = format!("{CLOUDFLARED_RELEASE_BASE}/{asset}");
+    let bytes =
+        crate::tunnel::download::download_release_asset(&settings, &url, "cloudflared").await?;
+    let dest = cached_cloudflared_path()
+        .ok_or_else(|| AppError::Message("无法确定 cloudflared 缓存目录。".into()))?;
+
+    install_cloudflared_binary(&dest, &bytes)?;
+    if dest.is_file() {
+        Ok(dest)
+    } else {
+        Err(AppError::Message("cloudflared 自动安装失败。".into()))
+    }
+}
+
+fn install_cloudflared_binary(dest: &Path, bytes: &[u8]) -> AppResult<()> {
+    if bytes.is_empty() {
+        return Err(AppError::Message("下载的 cloudflared 文件为空。".into()));
+    }
+
+    let parent = dest
+        .parent()
+        .ok_or_else(|| AppError::Message("cloudflared 缓存路径无效。".into()))?;
+    std::fs::create_dir_all(parent)?;
+
+    let file_name = dest
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("cloudflared");
+    let temp = parent.join(format!(".{file_name}.download-{}", Uuid::new_v4().simple()));
+
+    if let Err(error) = std::fs::write(&temp, bytes) {
+        let _ = std::fs::remove_file(&temp);
+        return Err(error.into());
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = std::fs::metadata(&temp)?.permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&temp, permissions)?;
+    }
+
+    if dest.is_file() {
+        let _ = std::fs::remove_file(&temp);
+        return Ok(());
+    }
+
+    if let Err(error) = std::fs::rename(&temp, dest) {
+        if dest.is_file() {
+            let _ = std::fs::remove_file(&temp);
+            return Ok(());
+        }
+        let _ = std::fs::remove_file(&temp);
+        return Err(AppError::Message(format!("安装 cloudflared 失败: {error}")));
+    }
+
+    Ok(())
 }
 
 pub fn extract_trycloudflare_url(line: &str) -> Option<String> {
@@ -116,7 +207,6 @@ pub async fn spawn_cloudflare_tunnel(
     named_public_url: &str,
     use_proxy: bool,
 ) -> AppResult<CloudflareTunnelHandle> {
-    let cloudflared = resolve_cloudflared()?;
     let quick = cloudflare_mode != "named";
 
     if !quick {
@@ -131,6 +221,8 @@ pub async fn spawn_cloudflare_tunnel(
             ));
         }
     }
+
+    let cloudflared = ensure_cloudflared().await?;
 
     let mut cmd = Command::new(&cloudflared);
     cmd.current_dir(cwd);
@@ -344,7 +436,7 @@ pub async fn stop_child(mut child: Child, pid: Option<u32>) -> AppResult<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::extract_trycloudflare_url;
+    use super::{cloudflared_release_asset, extract_trycloudflare_url, install_cloudflared_binary};
 
     #[test]
     fn extracts_trycloudflare_url_from_log_line() {
@@ -359,5 +451,46 @@ mod tests {
     fn ignores_invalid_hosts() {
         let line = "https://bad_host.trycloudflare.com";
         assert!(extract_trycloudflare_url(line).is_none());
+    }
+
+    #[test]
+    fn maps_supported_cloudflared_release_assets() {
+        assert_eq!(
+            cloudflared_release_asset("linux", "x86_64").unwrap(),
+            "cloudflared-linux-amd64"
+        );
+        assert_eq!(
+            cloudflared_release_asset("linux", "aarch64").unwrap(),
+            "cloudflared-linux-arm64"
+        );
+        assert_eq!(
+            cloudflared_release_asset("windows", "x86_64").unwrap(),
+            "cloudflared-windows-amd64.exe"
+        );
+        assert!(cloudflared_release_asset("macos", "aarch64").is_err());
+    }
+
+    #[test]
+    fn rejects_empty_cloudflared_download() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let dest = temp.path().join("cloudflared");
+        assert!(install_cloudflared_binary(&dest, &[]).is_err());
+        assert!(!dest.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn installs_cloudflared_cache_with_executable_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempfile::tempdir().expect("tempdir");
+        let dest = temp.path().join("bin").join("cloudflared");
+        install_cloudflared_binary(&dest, b"probe").expect("install cloudflared");
+
+        assert_eq!(std::fs::read(&dest).unwrap(), b"probe");
+        assert_ne!(
+            std::fs::metadata(&dest).unwrap().permissions().mode() & 0o111,
+            0
+        );
     }
 }

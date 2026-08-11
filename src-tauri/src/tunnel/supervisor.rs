@@ -886,8 +886,6 @@ fn validate_tunnel_requirements(
         return Err(AppError::Message("当前仅支持 FRP 和 Cloudflare。".into()));
     }
 
-    cloudflare::resolve_cloudflared()?;
-
     let (mode, token, named_url) = match kind {
         TunnelServiceKind::Mcp => (
             profile.tunnel.cloudflare_mode.as_str(),

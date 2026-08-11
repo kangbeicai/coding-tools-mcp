@@ -44,6 +44,30 @@ Linux:   src-tauri/target/release/coding-tools
 Windows: src-tauri\target\release\coding-tools.exe
 ```
 
+## 下载 Release 二进制
+
+正式版本通过 GitHub Release 提供 Linux x86_64、Linux aarch64 和 Windows x86_64 三个平台的 Headless/Web 二进制，以及 `SHA256SUMS`。将 `VERSION` 替换为实际 tag：
+
+Linux x86_64：
+
+```bash
+VERSION=vX.Y.Z
+curl -fL "https://github.com/kangbeicai/coding-tools-mcp/releases/download/${VERSION}/coding-tools-linux-x86_64" -o coding-tools
+chmod +x coding-tools
+./coding-tools
+```
+
+或使用 wget：
+
+```bash
+VERSION=vX.Y.Z
+wget "https://github.com/kangbeicai/coding-tools-mcp/releases/download/${VERSION}/coding-tools-linux-x86_64" -O coding-tools
+chmod +x coding-tools
+./coding-tools
+```
+
+Linux aarch64 将文件名替换为 `coding-tools-linux-aarch64`；Windows x86_64 下载 `coding-tools-windows-x86_64.exe`。每个 Release 同时提供 `SHA256SUMS` 用于完整性校验。
+
 ## 运行
 
 ```bash
@@ -175,7 +199,7 @@ OAuth metadata、授权和 token 端点使用同一 canonical public URL。Cloud
 - FRP：启动受管 `frpc` 并把 Gateway 暴露到配置的 HTTPS 域名。
 - Cloudflare：支持 Quick Tunnel 和 Named Tunnel；Named Tunnel 需要 Token 与固定公网 URL。
 
-`frpc` 可以自动下载到配置目录缓存；Linux 使用对应 tar.gz，Windows x86_64 使用官方 ZIP 并缓存为 `frpc.exe`。`cloudflared` 需要安装在 `PATH`/常见平台路径，或放到配置目录的 `bin/cloudflared`（Windows 为 `cloudflared.exe`）。Windows 也可使用 `winget install Cloudflare.cloudflared`。
+`frpc` 与 `cloudflared` 都支持按需自动下载到配置目录缓存。启动 exposure 时会先复用 PATH、平台常见路径或已有缓存；只有找不到对应 binary 时才下载。`cloudflared` 使用 Cloudflare 官方 latest release：Linux x86_64/aarch64 下载独立 binary，Windows x86_64 下载 `cloudflared-windows-amd64.exe` 并缓存为 `cloudflared.exe`。下载继续复用全局 GitHub mirror 与下载代理设置；用户无需单独启动 `cloudflared`。
 
 停止 Gateway 时会停止受管公网暴露。单独重启 Gateway listener 时，运行中的受管 exposure 会尽量保留，避免固定公网连接不必要重建。
 

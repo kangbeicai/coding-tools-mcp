@@ -24,11 +24,14 @@ coding-tools
 
 Tauri desktop binary、commands、桌面窗口/托盘/WebView 和 desktop release workflows 已删除。Rust crate 虽继续位于 `src-tauri/`，但不再依赖 Tauri。Windows 仅恢复服务端所需的 Win32 platform/exec/tunnel 原语，继续使用同一个 Web Admin，不恢复桌面壳；macOS 仍未支持。
 
+GitHub 发布链重新建立为 Headless-only：`v*` tag 或手动指定已有 tag 后，先执行前端检查/构建与 Rust 全量测试，再由 GitHub-hosted Linux x86_64、Linux arm64、Windows x86_64 runner 原生构建三个 binary，最终聚合为 GitHub Release 并生成 `SHA256SUMS`。该流程不包含 Tauri bundle、安装器或 macOS desktop 产物。
+
 ## 高影响边界
 
 - Web `invokeCommand` 是所有保留管理页面的 transport 汇合点，已统一为 `/api/rpc`。
 - `async_runtime::spawn` 仍位于 Gateway、listener、session 和 tunnel 生命周期关键路径，保留纯 Tokio 实现。
 - `spawn_cloudflare_tunnel` 同时服务 Gateway exposure 与旧 Workspace runtime tunnel supervisor。
+- `spawn_cloudflare_tunnel` 调用异步 `ensure_cloudflared()`：本机已有 binary 时直接复用，缺失时才通过既有 GitHub mirror/download proxy 链下载官方平台 binary 到配置目录缓存；同步 tunnel 配置校验不产生下载副作用。
 - `spawn_frpc`/`spawn_frpc_config` 覆盖 Workspace 聚合 FRP 与 Gateway FRP。
 - `validate_command_for_workspace` 是所有 `exec_command` 的安全策略入口；默认 workspace script extension 按 target 隔离，Linux 保持 `.sh`，Windows 使用 `.exe/.bat/.cmd/.ps1`。
 - `platform()` 是 OS primitive 的全局高影响入口：Linux 返回 `LinuxPlatform`，Windows 返回 `WindowsPlatform`，调用方契约保持一致。

@@ -44,6 +44,30 @@ Linux:   src-tauri/target/release/coding-tools
 Windows: src-tauri\target\release\coding-tools.exe
 ```
 
+## Download Release binaries
+
+Tagged GitHub Releases publish Headless/Web binaries for Linux x86_64, Linux aarch64, and Windows x86_64 together with `SHA256SUMS`. Replace `VERSION` with the release tag:
+
+Linux x86_64:
+
+```bash
+VERSION=vX.Y.Z
+curl -fL "https://github.com/kangbeicai/coding-tools-mcp/releases/download/${VERSION}/coding-tools-linux-x86_64" -o coding-tools
+chmod +x coding-tools
+./coding-tools
+```
+
+Or with wget:
+
+```bash
+VERSION=vX.Y.Z
+wget "https://github.com/kangbeicai/coding-tools-mcp/releases/download/${VERSION}/coding-tools-linux-x86_64" -O coding-tools
+chmod +x coding-tools
+./coding-tools
+```
+
+For Linux aarch64 use `coding-tools-linux-aarch64`. Windows x86_64 uses `coding-tools-windows-x86_64.exe`. Every Release also contains `SHA256SUMS` for integrity verification.
+
 ## Run
 
 ```bash
@@ -136,7 +160,7 @@ Managed exposure options:
 - FRP through a managed `frpc` process.
 - Cloudflare Quick or Named Tunnel. Named mode requires a tunnel token and fixed public URL.
 
-`frpc` can be downloaded to the application cache: Linux uses the matching tar.gz release and Windows x86_64 uses the official ZIP and caches `frpc.exe`. Install `cloudflared` on `PATH`, in a common platform location, or as `bin/cloudflared` (`cloudflared.exe` on Windows) under the configuration directory. On Windows, `winget install Cloudflare.cloudflared` is also supported.
+Both `frpc` and `cloudflared` support on-demand download into the application cache. Starting an exposure first reuses a binary from `PATH`, common platform locations, or the existing cache; only a missing binary triggers a download. `cloudflared` uses Cloudflare's official latest release: Linux x86_64/aarch64 downloads the standalone binary, while Windows x86_64 downloads `cloudflared-windows-amd64.exe` and caches it as `cloudflared.exe`. Downloads reuse the global GitHub mirror and download-proxy settings, and users do not start `cloudflared` separately.
 
 ## Client workflow
 
