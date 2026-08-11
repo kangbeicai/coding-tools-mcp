@@ -1,8 +1,8 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::error::AppResult;
 
-/// Linux OS primitives used by the server runtime.
+/// Cross-platform OS primitives used by the headless server runtime.
 #[allow(dead_code)]
 pub trait Platform: Send + Sync {
     fn os_name(&self) -> &'static str;
@@ -23,6 +23,11 @@ pub trait Platform: Send + Sync {
 
     fn terminate_process_tree(&self, pid: u32) -> AppResult<()>;
 
+    /// Best-effort cleanup for processes whose image path matches an app-managed binary.
+    fn terminate_processes_by_image_path(&self, _image_path: &Path) -> AppResult<usize> {
+        Ok(0)
+    }
+
     fn resolve_executable(&self, name: &str) -> Option<PathBuf>;
 
     fn cloudflared_candidates(&self) -> Vec<PathBuf>;
@@ -30,14 +35,80 @@ pub trait Platform: Send + Sync {
     fn frpc_candidates(&self) -> Vec<PathBuf>;
 }
 
+#[cfg(target_os = "linux")]
 mod linux;
+#[cfg(target_os = "windows")]
+mod windows;
 
 mod paths;
 
+#[cfg(target_os = "linux")]
 pub use linux::LinuxPlatform;
+#[cfg(target_os = "windows")]
+pub use windows::WindowsPlatform;
 
-static PLATFORM: std::sync::OnceLock<LinuxPlatform> = std::sync::OnceLock::new();
+static PLATFORM: std::sync::OnceLock<Box<dyn Platform>> = std::sync::OnceLock::new();
 
 pub fn platform() -> &'static dyn Platform {
-    PLATFORM.get_or_init(|| LinuxPlatform)
+    PLATFORM.get_or_init(create_platform).as_ref()
+}
+
+fn create_platform() -> Box<dyn Platform> {
+    #[cfg(target_os = "linux")]
+    {
+        Box::new(LinuxPlatform)
+    }
+    #[cfg(target_os = "windows")]
+    {
+        Box::new(WindowsPlatform)
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+    {
+        struct UnsupportedPlatform;
+
+        impl Platform for UnsupportedPlatform {
+            fn os_name(&self) -> &'static str {
+                "unsupported"
+            }
+
+            fn app_config_dir(&self) -> AppResult<PathBuf> {
+                Err(crate::error::AppError::Message(
+                    "unsupported operating system; coding-tools currently supports Linux and Windows"
+                        .into(),
+                ))
+            }
+
+            fn find_pid_listening_on_port(&self, _port: u16) -> AppResult<Option<u32>> {
+                Ok(None)
+            }
+
+            fn process_image_path(&self, _pid: u32) -> AppResult<Option<String>> {
+                Ok(None)
+            }
+
+            fn is_process_alive(&self, _pid: u32) -> bool {
+                false
+            }
+
+            fn terminate_process_tree(&self, _pid: u32) -> AppResult<()> {
+                Ok(())
+            }
+
+            fn resolve_executable(&self, name: &str) -> Option<PathBuf> {
+                paths::resolve_from_path(name)
+            }
+
+            fn cloudflared_candidates(&self) -> Vec<PathBuf> {
+                paths::resolve_from_path("cloudflared")
+                    .into_iter()
+                    .collect()
+            }
+
+            fn frpc_candidates(&self) -> Vec<PathBuf> {
+                paths::resolve_from_path("frpc").into_iter().collect()
+            }
+        }
+
+        Box::new(UnsupportedPlatform)
+    }
 }

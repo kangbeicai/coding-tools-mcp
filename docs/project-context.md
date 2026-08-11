@@ -21,6 +21,7 @@
 - [测试策略](./project-context/how-to-test.md)
 - [代码图谱洞察](./graph-insights/latest.md)
 - [Linux Headless-only 规格](./specs/linux-headless-only/)
+- [Windows Headless + Activity 规格](./specs/headless-windows-activity/)
 
 ## 关键约束
 

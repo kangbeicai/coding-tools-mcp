@@ -1,4 +1,4 @@
-//! Linux/server-oriented entry points that do not require a graphical session.
+//! Server-oriented entry points for Linux and Windows that do not require a graphical session.
 //! Running `coding-tools` with no subcommand starts the
 //! foreground Gateway + Web Console, similar to other developer CLIs.
 
@@ -613,7 +613,7 @@ fn print_help() {
     println!("  --admin-bind 0.0.0.0 --admin-port 28767 [--web-root ./build]");
     println!("  Overrides can be passed directly, e.g. `coding-tools --port 28766`.");
     println!();
-    println!("Linux headless build:");
+    println!("Linux / Windows headless build:");
     println!("  npm ci && npm run build");
     println!("  cargo build --release --manifest-path src-tauri/Cargo.toml --bin coding-tools");
     println!("  The Web Console built above is embedded into the headless binary.");
@@ -621,8 +621,9 @@ fn print_help() {
     println!("LAN Web Console:");
     println!("  http://<server-ip>:28767");
     println!();
-    println!("Advanced optional service mode:");
+    println!("Advanced optional service mode (Linux/systemd only):");
     println!("  coding-tools service install|status|uninstall");
+    println!("  Windows: run coding-tools in the foreground or use an external Windows service manager.");
 }
 
 #[cfg(test)]

@@ -1,5 +1,7 @@
 # 任务清单：history-session-archive
 
+> **Superseded baseline:** 本清单记录 v1 已完成工作，仅作历史参考。后续 History Session 实施与验收使用 `docs/specs/history-session-v2/tasks.md`。
+
 ## 概述
 
 以纯增量方式实现 ChatGPT 网页版会话历史归档。严格执行 RED-GREEN-REFACTOR，现有工具行为不变。

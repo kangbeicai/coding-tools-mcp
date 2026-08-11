@@ -484,6 +484,7 @@ pub fn kill_session(store: &SessionStore, args: &Value) -> Result<Value, Workspa
     Ok(tool_ok(payload))
 }
 
+#[cfg(target_os = "linux")]
 fn send_session_signal(pid: u32, signal: &str) {
     let sig = match signal {
         "KILL" => libc::SIGKILL,
@@ -494,3 +495,11 @@ fn send_session_signal(pid: u32, signal: &str) {
         libc::kill(pid as i32, sig);
     }
 }
+
+#[cfg(windows)]
+fn send_session_signal(pid: u32, _signal: &str) {
+    let _ = crate::platform::platform().terminate_process_tree(pid);
+}
+
+#[cfg(not(any(target_os = "linux", windows)))]
+fn send_session_signal(_pid: u32, _signal: &str) {}

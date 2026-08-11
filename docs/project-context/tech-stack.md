@@ -16,4 +16,4 @@
 
 当前 Rust crate 保留在 `src-tauri/` 路径以避免无价值的大规模移动，但不依赖 Tauri。
 
-主要依赖以 `src-tauri/Cargo.toml` 和 `package.json` 为准。项目仅支持 Linux，使用 `/proc`、Unix signal 和 process-group 行为完成端口与子进程管理。
+主要依赖以 `src-tauri/Cargo.toml` 和 `package.json` 为准。当前运行平台为 Linux x86_64/aarch64 与 Windows x86_64，均使用同一个无桌面 UI 的 `coding-tools` binary 和浏览器 Web Console。Linux 平台原语使用 `/proc`、Unix signal/process-group；Windows 平台原语使用 Win32 TCP/process APIs 和无窗口子进程创建标志。

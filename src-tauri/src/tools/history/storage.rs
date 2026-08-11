@@ -9,7 +9,9 @@ use sha2::{Digest, Sha256};
 use crate::tools::workspace::{relative_display, Workspace, WorkspaceError, WorkspaceResult};
 
 use super::markdown;
-use super::model::{HistoryDocument, HistoryIndex, IndexEntry, ScanReport};
+use super::model::{
+    HistoryDocument, HistoryIndex, IndexEntry, MemoryManifest, MemoryState, ScanReport,
+};
 
 pub const DEFAULT_HISTORY_DIR: &str = "docs/history-session";
 
@@ -221,33 +223,51 @@ pub fn rebuild_index(report: &ScanReport) -> HistoryIndex {
 }
 
 pub fn read_index(history_dir: &Path) -> WorkspaceResult<Option<HistoryIndex>> {
-    let path = history_dir.join("index.json");
-    if !path.exists() {
-        return Ok(None);
-    }
-    let content =
-        fs::read_to_string(&path).map_err(|error| io_error("HISTORY_READ_FAILED", error, true))?;
-    serde_json::from_str(&content)
-        .map(Some)
-        .map_err(|error| WorkspaceError::ToolDetails {
-            code: "HISTORY_INDEX_INVALID",
-            message: "History index is not valid JSON.".into(),
-            category: "validation",
-            retryable: true,
-            details: serde_json::json!({"error": error.to_string()}),
-        })
+    read_json(
+        &history_dir.join("index.json"),
+        "HISTORY_INDEX_INVALID",
+        "History index",
+    )
 }
 
 pub fn write_index(history_dir: &Path, index: &HistoryIndex) -> WorkspaceResult<()> {
-    let content =
-        serde_json::to_vec_pretty(index).map_err(|error| WorkspaceError::ToolDetails {
-            code: "HISTORY_WRITE_FAILED",
-            message: "Unable to serialize history index.".into(),
-            category: "internal",
-            retryable: true,
-            details: serde_json::json!({"error": error.to_string()}),
-        })?;
-    atomic_write(&history_dir.join("index.json"), &content)
+    write_json(&history_dir.join("index.json"), index, "history index")
+}
+
+pub fn memory_dir(history_dir: &Path) -> PathBuf {
+    history_dir.join("memory")
+}
+
+pub fn read_manifest(history_dir: &Path) -> WorkspaceResult<Option<MemoryManifest>> {
+    read_json(
+        &memory_dir(history_dir).join("manifest.json"),
+        "HISTORY_MANIFEST_INVALID",
+        "History manifest",
+    )
+}
+
+pub fn write_manifest(history_dir: &Path, manifest: &MemoryManifest) -> WorkspaceResult<()> {
+    write_json(
+        &memory_dir(history_dir).join("manifest.json"),
+        manifest,
+        "history manifest",
+    )
+}
+
+pub fn read_state(history_dir: &Path) -> WorkspaceResult<Option<MemoryState>> {
+    read_json(
+        &memory_dir(history_dir).join("state.json"),
+        "HISTORY_STATE_INVALID",
+        "History state",
+    )
+}
+
+pub fn write_state(history_dir: &Path, state: &MemoryState) -> WorkspaceResult<()> {
+    write_json(
+        &memory_dir(history_dir).join("state.json"),
+        state,
+        "history state",
+    )
 }
 
 pub fn write_markdown(path: &Path, content: &str) -> WorkspaceResult<()> {
@@ -256,6 +276,38 @@ pub fn write_markdown(path: &Path, content: &str) -> WorkspaceResult<()> {
 
 pub fn sha256(content: &[u8]) -> String {
     format!("{:x}", Sha256::digest(content))
+}
+
+fn read_json<T>(path: &Path, invalid_code: &'static str, label: &str) -> WorkspaceResult<Option<T>>
+where
+    T: serde::de::DeserializeOwned,
+{
+    if !path.exists() {
+        return Ok(None);
+    }
+    let content =
+        fs::read_to_string(path).map_err(|error| io_error("HISTORY_READ_FAILED", error, true))?;
+    serde_json::from_str(&content)
+        .map(Some)
+        .map_err(|error| WorkspaceError::ToolDetails {
+            code: invalid_code,
+            message: format!("{label} is not valid JSON."),
+            category: "validation",
+            retryable: true,
+            details: serde_json::json!({"error": error.to_string()}),
+        })
+}
+
+fn write_json<T: serde::Serialize>(path: &Path, value: &T, label: &str) -> WorkspaceResult<()> {
+    let content =
+        serde_json::to_vec_pretty(value).map_err(|error| WorkspaceError::ToolDetails {
+            code: "HISTORY_WRITE_FAILED",
+            message: format!("Unable to serialize {label}."),
+            category: "internal",
+            retryable: true,
+            details: serde_json::json!({"error": error.to_string()}),
+        })?;
+    atomic_write(path, &content)
 }
 
 fn atomic_write(target: &Path, content: &[u8]) -> WorkspaceResult<()> {
@@ -283,8 +335,38 @@ fn atomic_write(target: &Path, content: &[u8]) -> WorkspaceResult<()> {
     result.map_err(|error| io_error("HISTORY_WRITE_FAILED", error, true))
 }
 
+#[cfg(not(windows))]
 fn atomic_replace(source: &Path, target: &Path) -> io::Result<()> {
     fs::rename(source, target)
+}
+
+#[cfg(windows)]
+fn atomic_replace(source: &Path, target: &Path) -> io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+
+    use windows::core::PCWSTR;
+    use windows::Win32::Storage::FileSystem::{
+        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+    };
+
+    let source = source
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect::<Vec<_>>();
+    let target = target
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect::<Vec<_>>();
+    unsafe {
+        MoveFileExW(
+            PCWSTR(source.as_ptr()),
+            PCWSTR(target.as_ptr()),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+        .map_err(|error| io::Error::other(error.to_string()))
+    }
 }
 
 fn io_error(code: &'static str, error: io::Error, retryable: bool) -> WorkspaceError {

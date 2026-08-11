@@ -3,6 +3,9 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::time::{sleep, Duration};
@@ -66,6 +69,26 @@ fn sanitize_workspace_id(workspace_id: &str) -> String {
     } else {
         sanitized
     }
+}
+
+fn extract_frpc_from_zip(archive_path: &Path, dest: &Path, binary_suffix: &str) -> AppResult<()> {
+    let file = std::fs::File::open(archive_path)?;
+    let mut archive = zip::ZipArchive::new(file)
+        .map_err(|err| AppError::Message(format!("解压 frpc 安装包失败: {err}")))?;
+    for index in 0..archive.len() {
+        let mut entry = archive
+            .by_index(index)
+            .map_err(|err| AppError::Message(format!("读取 frpc 安装包失败: {err}")))?;
+        let name = entry.name().replace('\\', "/");
+        if name.ends_with(binary_suffix) || name.ends_with("/frpc") || name.ends_with("/frpc.exe") {
+            let mut out = std::fs::File::create(dest)?;
+            std::io::copy(&mut entry, &mut out)?;
+            return Ok(());
+        }
+    }
+    Err(AppError::Message(
+        "frpc 安装包中未找到 frpc 可执行文件。".into(),
+    ))
 }
 
 pub(crate) fn managed_frpc_config_matches(workspace_id: &str, expected: &str) -> AppResult<bool> {
@@ -251,7 +274,17 @@ pub(crate) async fn stop_recorded_frpc_instance(workspace_id: &str) -> AppResult
 fn same_process_image(left: &Path, right: &Path) -> bool {
     let left = std::fs::canonicalize(left).unwrap_or_else(|_| left.to_path_buf());
     let right = std::fs::canonicalize(right).unwrap_or_else(|_| right.to_path_buf());
-    left == right
+    #[cfg(windows)]
+    {
+        return left
+            .to_string_lossy()
+            .trim_start_matches("\\\\?\\")
+            .eq_ignore_ascii_case(right.to_string_lossy().trim_start_matches("\\\\?\\"));
+    }
+    #[cfg(not(windows))]
+    {
+        left == right
+    }
 }
 
 pub async fn spawn_frpc(
@@ -295,7 +328,16 @@ pub async fn spawn_frpc(
     cmd.stderr(std::process::Stdio::piped());
     cmd.current_dir(&first_profile.path);
 
-    cmd.process_group(0);
+    #[cfg(windows)]
+    {
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW);
+    }
+    #[cfg(unix)]
+    {
+        cmd.process_group(0);
+    }
 
     // 一个聚合 frpc 只有一套进程环境，不能按工作区分别设置代理。
     // 任一路由要求使用代理时，为整个聚合连接启用代理；这样 HashMap
@@ -370,7 +412,16 @@ pub(crate) async fn spawn_frpc_config(
     cmd.stderr(std::process::Stdio::piped());
     cmd.current_dir(cwd);
 
-    cmd.process_group(0);
+    #[cfg(windows)]
+    {
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW);
+    }
+    #[cfg(unix)]
+    {
+        cmd.process_group(0);
+    }
 
     if use_proxy {
         crate::tunnel::cloudflare::apply_proxy_env(&mut cmd, &settings.proxy);
@@ -447,6 +498,9 @@ fn validate_frp_config(config: &FrpServerConfig) -> AppResult<()> {
 fn bundled_frpc() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let dir = exe.parent()?;
+    #[cfg(windows)]
+    let names = ["frpc.exe"];
+    #[cfg(not(windows))]
     let names = ["frpc"];
     for name in names {
         let candidate = dir.join(name);
@@ -465,7 +519,14 @@ pub(crate) fn cached_frpc_path() -> Option<PathBuf> {
 }
 
 pub(crate) fn frpc_binary_name() -> &'static str {
-    "frpc"
+    #[cfg(windows)]
+    {
+        "frpc.exe"
+    }
+    #[cfg(not(windows))]
+    {
+        "frpc"
+    }
 }
 
 pub(crate) fn frpc_log_name(kind: TunnelServiceKind) -> &'static str {
@@ -818,8 +879,13 @@ pub(crate) async fn download_frpc_to_cache() -> AppResult<PathBuf> {
         std::fs::create_dir_all(parent)?;
     }
 
-    extract_frpc_from_tar_gz(&archive_path, &dest, binary_in_archive)?;
+    if archive_name.ends_with(".zip") {
+        extract_frpc_from_zip(&archive_path, &dest, binary_in_archive)?;
+    } else {
+        extract_frpc_from_tar_gz(&archive_path, &dest, binary_in_archive)?;
+    }
 
+    #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         if let Ok(meta) = std::fs::metadata(&dest) {
@@ -867,15 +933,23 @@ fn extract_frpc_from_tar_gz(
 }
 
 fn frp_release_asset() -> AppResult<(&'static str, &'static str)> {
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    {
+        Ok(("frp_0.61.2_windows_amd64.zip", "frpc.exe"))
+    }
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
     {
         Ok(("frp_0.61.2_linux_amd64.tar.gz", "frpc"))
     }
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
     {
         Ok(("frp_0.61.2_linux_arm64.tar.gz", "frpc"))
     }
-    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+    #[cfg(not(any(
+        all(target_os = "windows", target_arch = "x86_64"),
+        all(target_os = "linux", target_arch = "x86_64"),
+        all(target_os = "linux", target_arch = "aarch64"),
+    )))]
     {
         Err(AppError::Message("当前平台暂不支持自动下载 frpc。".into()))
     }

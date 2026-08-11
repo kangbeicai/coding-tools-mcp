@@ -1,5 +1,7 @@
 # 设计文档：history-session-archive
 
+> **Superseded baseline:** 本文保留 v1 设计用于追溯。当前实现设计以 `docs/specs/history-session-v2/design.md` 为准；不得据本文重新引入全历史 bootstrap、递归 inherited summary 或 Desktop 平台路径。
+
 ## 概述
 
 本功能作为 `tools/history/` 独立领域模块加入现有 MCP 工具内核。MCP 层只负责把 ChatGPT `_meta["openai/session"]` 作为内部参数传入历史工具；工具注册表负责暴露三个新工具；历史模块负责解析、校验、加锁、原子写入、脱敏和摘要。既有工具分支、Schema 和结果保持不变。

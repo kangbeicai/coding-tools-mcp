@@ -1,16 +1,16 @@
 # Coding Tools MCP
 
-A self-hosted Linux Coding Gateway and browser Web Console. One `coding-tools` process provides a multi-workspace MCP Gateway, OAuth/Bearer authentication, and optional managed FRP or Cloudflare exposure.
+A self-hosted Linux / Windows Coding Gateway and browser Web Console. One `coding-tools` process provides a multi-workspace MCP Gateway, OAuth/Bearer authentication, and optional managed FRP or Cloudflare exposure.
 
 [中文](README.md)
 
 ## Scope
 
-- Linux x86_64 and aarch64 only.
+- Linux x86_64 / aarch64 and Windows x86_64.
 - A single `coding-tools` CLI binary; no desktop shell or system WebView.
 - Browser management through `POST /api/rpc`.
 - One root `/mcp` connector with per-session workspace selection.
-- No Docker requirement. Run in the foreground by default or install an optional user-level systemd service.
+- No Docker requirement. Foreground mode is the default on Linux and Windows; the built-in user-level systemd installer is Linux-only.
 
 ## Default endpoints
 
@@ -26,7 +26,7 @@ Web Admin authentication is separate from MCP OAuth/Bearer authentication. The A
 
 ## Build
 
-Node.js 20+, npm, Rust stable, and standard Linux build tools are required.
+Node.js 20+, npm, and Rust stable are required. Linux additionally needs the normal system build tools; Windows uses a Rust Windows toolchain.
 
 ```bash
 npm ci
@@ -40,7 +40,8 @@ The Rust build embeds the generated frontend. Always run `npm run build` before 
 The binary is written to:
 
 ```text
-src-tauri/target/release/coding-tools
+Linux:   src-tauri/target/release/coding-tools
+Windows: src-tauri\target\release\coding-tools.exe
 ```
 
 ## Run
@@ -48,6 +49,14 @@ src-tauri/target/release/coding-tools
 ```bash
 ./src-tauri/target/release/coding-tools
 ```
+
+Windows PowerShell:
+
+```powershell
+.\src-tauri\target\release\coding-tools.exe
+```
+
+Both platforms run the same headless MCP Gateway + Web Admin. Windows does not create a native window, tray icon, or WebView.
 
 Useful commands:
 
@@ -58,10 +67,17 @@ coding-tools workspace list
 coding-tools admin reset
 coding-tools config show
 coding-tools health --json
+```
+
+Linux can additionally install the user-level systemd service:
+
+```bash
 coding-tools service install
 coding-tools service status
 coding-tools service uninstall
 ```
+
+Windows does not currently include a Windows Service installer. To run it persistently, supervise the same `coding-tools.exe` with Windows or a third-party service manager.
 
 Runtime overrides:
 
@@ -98,11 +114,14 @@ The reset command updates persisted configuration, while an already running `cod
 
 ## Configuration
 
-Existing Linux installations continue to use this directory to avoid losing persisted workspaces, secrets, and tunnel settings:
+For compatibility with existing installations, the configuration directory keeps its historical name:
 
 ```text
-~/.config/coding-tools-mcp-desktop/
+Linux:   ~/.config/coding-tools-mcp-desktop/
+Windows: %APPDATA%\coding-tools-mcp-desktop\
 ```
+
+The `desktop` suffix is only a legacy data-path name. The current Linux and Windows product remains headless/browser-based and does not start a desktop UI. Workspaces, Gateway settings, credentials, and tunnel configuration continue to use this location.
 
 Workspace paths are absolute paths on the server, such as `/home/user/projects/example`.
 
@@ -117,17 +136,32 @@ Managed exposure options:
 - FRP through a managed `frpc` process.
 - Cloudflare Quick or Named Tunnel. Named mode requires a tunnel token and fixed public URL.
 
-`frpc` can be downloaded to the application cache. Install `cloudflared` on `PATH`, in a common Linux location, or as `bin/cloudflared` under the configuration directory.
+`frpc` can be downloaded to the application cache: Linux uses the matching tar.gz release and Windows x86_64 uses the official ZIP and caches `frpc.exe`. Install `cloudflared` on `PATH`, in a common platform location, or as `bin/cloudflared` (`cloudflared.exe` on Windows) under the configuration directory. On Windows, `winget install Cloudflare.cloudflared` is also supported.
 
 ## Client workflow
 
 1. Call `list_workspaces`.
 2. Call `select_workspace` for the current session.
-3. Call `history_session_bootstrap`.
+3. Call `history_session_bootstrap` and pass the verbatim first request as `initial_user_input`.
 4. Use file, Git, Exec, Patch, and other tools.
-5. Call `history_session_checkpoint` when the task is complete.
+5. When exact earlier context is needed, call `history_session_search` first and then page the original Markdown with `history_session_read`.
+6. Call `history_session_checkpoint` when the task is complete and pass the verbatim current request as `raw_user_input`.
 
-History remains project-local under each workspace's `docs/history-session/`.
+History Session v2 exposes five tools:
+
+| Tool | Purpose |
+|------|---------|
+| `history_session_bootstrap` | Create or resume the current session and return bounded current state plus retrieval guidance instead of all history |
+| `history_session_checkpoint` | Append structured progress and the current raw user input; changed content for the same turn is retained as revision/supersedes evidence |
+| `history_session_validate` | Validate archive numbering and rebuild `index.json`, `memory/state.json`, and `memory/manifest.json` when requested |
+| `history_session_search` | Search history archives by deterministic keywords and return bounded locations/snippets |
+| `history_session_read` | Read one numeric Markdown archive losslessly; pages default to 32 KiB and are capped at 64 KiB, with a content hash for change detection |
+
+History remains project-local under each workspace's `docs/history-session/`. Numeric `N.md` files are the durable source of truth; `memory/state.json` and `memory/manifest.json` are bounded derived data that can be rebuilt from Markdown.
+
+The `session_key` and `current_path` returned by `history_session_bootstrap` form the stable write target. Every checkpoint must pass them back unchanged as `session_key` and `expected_path`; changing ChatGPT host-session metadata cannot redirect an established checkpoint to another archive.
+
+The server cannot read ChatGPT transcript text that was not supplied as an MCP argument. Use `initial_input_captured`, `user_input_captured`, and returned warnings to determine whether the first/current request was actually archived.
 
 ## Verification
 

@@ -1,5 +1,7 @@
 # 需求文档：history-session-archive
 
+> **Superseded baseline:** 本文记录 History Session v1 的原始需求。当前规范行为以 `docs/specs/history-session-v2/` 为准；尤其是“bootstrap 返回全历史摘要/最新全文”“同 turn 原位覆盖”“Windows/macOS Desktop 兼容”已被 v2 的有界 state + search/read + revision + Linux Headless 约束替代。
+
 ## 功能概述
 
 为 ChatGPT 网页版新增跨会话开发状态归档能力。每个新聊天首次使用插件时，ChatGPT 先调用 `history_session_bootstrap`；服务端依据工具调用元数据 `_meta["openai/session"]` 识别当前聊天。没有历史时创建首个会话文件，已有历史时读取 `docs/history-session/` 并返回累计摘要、逐会话摘要和最新完整 handoff。功能支持 Windows、macOS 和 Linux，复用现有 Streamable HTTP `/mcp` 与隧道，不引入 OpenAI SDK，不改变任何现有工具的输入、输出或业务语义。

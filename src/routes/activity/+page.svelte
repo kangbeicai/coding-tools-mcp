@@ -101,8 +101,8 @@
   });
 </script>
 
-<section class="page-scroll">
-  <div class="mx-auto grid w-full max-w-7xl gap-5 p-6">
+<section class="page-scroll min-w-0 overflow-x-hidden">
+  <div class="mx-auto grid min-w-0 w-full max-w-7xl gap-5 p-6">
     <header class="flex flex-wrap items-start justify-between gap-4">
       <div>
         <div class="flex items-center gap-2">
@@ -128,7 +128,7 @@
       {#if activeCalls.length > 0}
         <div class="mt-4 grid gap-3 md:grid-cols-2">
           {#each activeCalls as trace (trace.traceId)}
-            <button type="button" class="tx-info-block text-left" onclick={() => void selectTrace(trace)}>
+            <button type="button" class="tx-info-block min-w-0 max-w-full overflow-hidden text-left" onclick={() => void selectTrace(trace)}>
               <div class="flex items-center justify-between gap-3">
                 <div class="flex min-w-0 items-center gap-2">
                   <span class="h-2 w-2 shrink-0 rounded-full bg-[var(--color-accent)]"></span>
@@ -136,9 +136,9 @@
                 </div>
                 <span class="tx-mono text-xs">{formatDuration(durationMs(trace))}</span>
               </div>
-              <div class="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-[var(--color-text-muted)]">
-                <span>{trace.workspaceName || "未绑定工作区"}</span>
-                <span>{trace.sessionId || "无会话标识"}</span>
+              <div class="mt-2 flex min-w-0 flex-wrap gap-x-3 gap-y-1 text-xs text-[var(--color-text-muted)]">
+                <span class="min-w-0 break-all">{trace.workspaceName || "未绑定工作区"}</span>
+                <span class="min-w-0 break-all">{trace.sessionId || "无会话标识"}</span>
                 <span>{formatTime(trace.startedAtMs)}</span>
               </div>
             </button>
@@ -159,19 +159,19 @@
         </p>
         <div class="mt-4 grid gap-3">
           {#each snapshot.activeProcesses as process (process.sessionId)}
-            <div class="tx-info-block">
+            <div class="tx-info-block min-w-0 max-w-full overflow-hidden">
               <div class="flex flex-wrap items-start justify-between gap-3">
-                <div class="min-w-0">
-                  <div class="flex items-center gap-2">
+                <div class="min-w-0 max-w-full flex-1">
+                  <div class="flex min-w-0 flex-wrap items-center gap-2">
                     <span class="h-2 w-2 rounded-full bg-[var(--color-accent)]"></span>
                     <span class="font-medium">{process.status}</span>
-                    <span class="tx-mono text-xs text-[var(--color-text-muted)]">{process.sessionId}</span>
+                    <span class="tx-mono min-w-0 break-all text-xs text-[var(--color-text-muted)]">{process.sessionId}</span>
                   </div>
-                  <p class="tx-mono mt-2 break-all text-sm">{process.command || "后台命令"}</p>
+                  <p class="tx-mono mt-2 max-w-full break-all whitespace-pre-wrap text-sm">{process.command || "后台命令"}</p>
                 </div>
                 <span class="tx-mono text-sm">{processDuration(process)}</span>
               </div>
-              <div class="mt-2 text-xs text-[var(--color-text-muted)]">
+              <div class="mt-2 min-w-0 break-all text-xs text-[var(--color-text-muted)]">
                 {process.workspaceName || "未绑定工作区"}
                 {#if process.operationId} · operation {process.operationId}{/if}
               </div>
@@ -209,8 +209,8 @@
       </div>
     </section>
 
-    <div class="grid gap-5 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-      <section class="tx-card overflow-hidden">
+    <div class="grid min-w-0 gap-5 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+      <section class="tx-card min-w-0 overflow-hidden">
         <div class="border-b border-[var(--color-border)] px-5 py-4">
           <h2 class="text-[15px] font-semibold">最近调用</h2>
           <p class="mt-1 text-xs text-[var(--color-text-muted)]">最新 {snapshot.traces.length} 条匹配记录</p>
@@ -224,7 +224,7 @@
             {#each snapshot.traces as trace (trace.traceId)}
               <button
                 type="button"
-                class="block w-full px-5 py-3 text-left transition hover:bg-[var(--color-surface-hover)]"
+                class="block min-w-0 w-full overflow-hidden px-5 py-3 text-left transition hover:bg-[var(--color-surface-hover)]"
                 onclick={() => void selectTrace(trace)}
               >
                 <div class="flex items-center justify-between gap-3">
@@ -254,31 +254,31 @@
             </div>
             <span class="tx-badge">{selected.status}</span>
           </div>
-          <div class="mt-4 grid gap-2 text-sm sm:grid-cols-2">
-            <div class="tx-info-block"><span class="tx-info-label">Workspace</span><div class="mt-1">{selected.workspaceName || "未绑定"}</div></div>
-            <div class="tx-info-block"><span class="tx-info-label">Duration</span><div class="mt-1 tx-mono">{formatDuration(durationMs(selected))}</div></div>
-            <div class="tx-info-block"><span class="tx-info-label">Session</span><div class="mt-1 tx-mono">{selected.sessionId || "-"}</div></div>
-            <div class="tx-info-block"><span class="tx-info-label">Route</span><div class="mt-1 tx-mono">{selected.route}</div></div>
+          <div class="mt-4 grid min-w-0 gap-2 text-sm sm:grid-cols-2">
+            <div class="tx-info-block min-w-0 overflow-hidden"><span class="tx-info-label">Workspace</span><div class="mt-1 break-all">{selected.workspaceName || "未绑定"}</div></div>
+            <div class="tx-info-block min-w-0 overflow-hidden"><span class="tx-info-label">Duration</span><div class="mt-1 tx-mono">{formatDuration(durationMs(selected))}</div></div>
+            <div class="tx-info-block min-w-0 overflow-hidden"><span class="tx-info-label">Session</span><div class="mt-1 tx-mono break-all">{selected.sessionId || "-"}</div></div>
+            <div class="tx-info-block min-w-0 overflow-hidden"><span class="tx-info-label">Route</span><div class="mt-1 tx-mono break-all">{selected.route}</div></div>
           </div>
           {#if selected.processSessionId || selected.operationId}
-            <div class="tx-alert mt-4">
+            <div class="tx-alert mt-4 min-w-0 max-w-full overflow-hidden break-all">
               Process: <span class="tx-mono">{selected.processSessionId || "-"}</span>
               {#if selected.operationId} · operation <span class="tx-mono">{selected.operationId}</span>{/if}
             </div>
           {/if}
-          <div class="mt-5 grid gap-4">
-            <div>
+          <div class="mt-5 grid min-w-0 gap-4">
+            <div class="min-w-0 max-w-full">
               <h3 class="mb-2 text-sm font-medium">Request</h3>
-              <pre class="max-h-96 overflow-auto rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-3 text-xs">{json(selected.request)}</pre>
+              <pre class="m-0 block max-h-96 min-w-0 max-w-full overflow-auto whitespace-pre-wrap break-all rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-3 text-xs">{json(selected.request)}</pre>
             </div>
-            <div>
+            <div class="min-w-0 max-w-full">
               <h3 class="mb-2 text-sm font-medium">Response</h3>
-              <pre class="max-h-96 overflow-auto rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-3 text-xs">{json(selected.response)}</pre>
+              <pre class="m-0 block max-h-96 min-w-0 max-w-full overflow-auto whitespace-pre-wrap break-all rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-3 text-xs">{json(selected.response)}</pre>
             </div>
             {#if selected.status === "failed"}
-              <div>
+              <div class="min-w-0 max-w-full">
                 <h3 class="mb-2 text-sm font-medium">Error</h3>
-                <pre class="max-h-72 overflow-auto rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-3 text-xs">{json(selected.error)}</pre>
+                <pre class="m-0 block max-h-72 min-w-0 max-w-full overflow-auto whitespace-pre-wrap break-all rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-3 text-xs">{json(selected.error)}</pre>
               </div>
             {/if}
           </div>

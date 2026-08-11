@@ -46,7 +46,7 @@ fn prepare_fixture(name: &str, symlink_escape: bool) -> FixtureWorkspace {
     if symlink_escape {
         let link = root.join("outside-link.txt");
         let _ = fs::remove_file(&link);
-        std::os::unix::fs::symlink(&outside_secret, &link).expect("symlink");
+        let _ = create_file_symlink(&outside_secret, &link);
     }
     FixtureWorkspace {
         root,
@@ -98,12 +98,45 @@ fn copy_dir_all(src: &Path, dst: &Path) -> std::io::Result<()> {
             copy_dir_all(&entry.path(), &target)?;
         } else if file_type.is_symlink() {
             let link = fs::read_link(entry.path())?;
-            std::os::unix::fs::symlink(link, target)?;
+            let resolved = if link.is_absolute() {
+                link.clone()
+            } else {
+                entry.path().parent().unwrap_or(src).join(&link)
+            };
+            create_symlink(&link, &target, resolved.is_dir())?;
         } else {
             fs::copy(entry.path(), target)?;
         }
     }
     Ok(())
+}
+
+fn create_file_symlink(source: &Path, target: &Path) -> std::io::Result<()> {
+    create_symlink(source, target, false)
+}
+
+fn create_symlink(source: &Path, target: &Path, is_dir: bool) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        let _ = is_dir;
+        std::os::unix::fs::symlink(source, target)
+    }
+    #[cfg(windows)]
+    {
+        if is_dir {
+            std::os::windows::fs::symlink_dir(source, target)
+        } else {
+            std::os::windows::fs::symlink_file(source, target)
+        }
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = (source, target, is_dir);
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "symlinks are unsupported on this platform",
+        ))
+    }
 }
 
 pub fn ctx_for(root: &Path) -> ToolContext {

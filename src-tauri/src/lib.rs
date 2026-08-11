@@ -1,5 +1,5 @@
-#[cfg(not(target_os = "linux"))]
-compile_error!("coding-tools currently supports Linux only");
+#[cfg(not(any(target_os = "linux", target_os = "windows")))]
+compile_error!("coding-tools currently supports Linux and Windows only");
 
 mod async_runtime;
 pub mod admin;

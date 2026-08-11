@@ -1,6 +1,9 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::oneshot;
@@ -27,8 +30,7 @@ pub fn resolve_cloudflared() -> AppResult<PathBuf> {
         .or_else(|| cached_cloudflared_path().filter(|path| path.is_file()))
         .ok_or_else(|| {
             AppError::Message(
-                "未找到 cloudflared。请在 Linux 服务器安装 Cloudflare Tunnel CLI，或放入应用配置目录的 bin/。"
-                    .into(),
+                "未找到 cloudflared。请安装 Cloudflare Tunnel CLI，或放入应用配置目录的 bin/；Windows 可使用 `winget install Cloudflare.cloudflared`。".into(),
             )
         })
 }
@@ -42,7 +44,14 @@ pub(crate) fn cached_cloudflared_path() -> Option<PathBuf> {
 }
 
 pub(crate) fn cloudflared_binary_name() -> &'static str {
-    "cloudflared"
+    #[cfg(windows)]
+    {
+        "cloudflared.exe"
+    }
+    #[cfg(not(windows))]
+    {
+        "cloudflared"
+    }
 }
 
 pub fn extract_trycloudflare_url(line: &str) -> Option<String> {
@@ -128,7 +137,16 @@ pub async fn spawn_cloudflare_tunnel(
     cmd.stdout(std::process::Stdio::piped());
     cmd.stderr(std::process::Stdio::piped());
 
-    cmd.process_group(0);
+    #[cfg(windows)]
+    {
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW);
+    }
+    #[cfg(unix)]
+    {
+        cmd.process_group(0);
+    }
 
     let settings = crate::settings::AppSettings::load_or_default();
     if use_proxy {

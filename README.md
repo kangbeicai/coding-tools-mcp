@@ -1,16 +1,16 @@
 # Coding Tools MCP
 
-Linux 自托管 Coding Gateway 与 Web Console。单个 `coding-tools` 进程同时提供多工作区 MCP Gateway、浏览器管理台、OAuth/Bearer 认证，以及可选 FRP/Cloudflare 公网暴露。
+Linux / Windows 自托管 Coding Gateway 与 Web Console。单个 `coding-tools` 进程同时提供多工作区 MCP Gateway、浏览器管理台、OAuth/Bearer 认证，以及可选 FRP/Cloudflare 公网暴露。
 
 [English](README.en.md)
 
 ## 产品边界
 
-- 仅支持 Linux x86_64 和 aarch64。
+- 支持 Linux x86_64 / aarch64，以及 Windows x86_64。
 - 唯一交付物是 `coding-tools` CLI，不包含桌面应用或系统 WebView。
 - Web Console 通过浏览器访问，所有管理调用统一走 `POST /api/rpc`。
 - ChatGPT/MCP 客户端只需连接一个根 `/mcp`，会话再选择工作区。
-- 不需要 Docker。默认前台运行，也可选装 user-level systemd 服务。
+- 不需要 Docker。Linux/Windows 都默认前台运行；仅 Linux 提供可选的 user-level systemd 安装命令。
 
 ## 默认端点
 
@@ -26,7 +26,7 @@ Web Console 使用独立的管理员登录保护。首次访问会进入 `/login
 
 ## 构建
 
-需要 Node.js 20+、npm、Rust stable，以及常见 Linux 构建工具。
+需要 Node.js 20+、npm、Rust stable。Linux 还需要常见系统构建工具；Windows 使用对应 Rust Windows toolchain。
 
 ```bash
 npm ci
@@ -40,7 +40,8 @@ cargo build --release --manifest-path src-tauri/Cargo.toml --bin coding-tools
 产物：
 
 ```text
-src-tauri/target/release/coding-tools
+Linux:   src-tauri/target/release/coding-tools
+Windows: src-tauri\target\release\coding-tools.exe
 ```
 
 ## 运行
@@ -48,6 +49,14 @@ src-tauri/target/release/coding-tools
 ```bash
 ./src-tauri/target/release/coding-tools
 ```
+
+Windows PowerShell：
+
+```powershell
+.\src-tauri\target\release\coding-tools.exe
+```
+
+两种平台都会启动同一套 Headless MCP Gateway + Web Admin；Windows 不创建桌面窗口、系统托盘或 WebView。
 
 等价的显式命令：
 
@@ -65,10 +74,17 @@ coding-tools admin reset
 coding-tools config show
 coding-tools health
 coding-tools health --json
+```
+
+Linux 可额外使用 systemd user service：
+
+```bash
 coding-tools service install
 coding-tools service status
 coding-tools service uninstall
 ```
+
+Windows 当前不内置 Windows Service 安装器；需要后台常驻时可使用系统或第三方 service manager 托管同一个 `coding-tools.exe`。
 
 临时覆盖监听配置：
 
@@ -119,13 +135,14 @@ http://<server-ip>:28767/login
 
 ## 配置与数据
 
-为兼容已部署实例，Linux 配置目录继续使用：
+为兼容已部署实例，配置目录继续保留历史名称：
 
 ```text
-~/.config/coding-tools-mcp-desktop/
+Linux:   ~/.config/coding-tools-mcp-desktop/
+Windows: %APPDATA%\coding-tools-mcp-desktop\
 ```
 
-本次 Headless-only 重构不会自动迁移或重命名该目录。工作区、Gateway、认证密钥和隧道配置继续从原位置读取。
+目录名中的 `desktop` 只是兼容旧安装的数据路径；当前 Linux/Windows 版本均为 Headless/Web 形态，不会启动桌面 UI。工作区、Gateway、认证密钥和隧道配置继续从原位置读取。
 
 工作区注册的是服务器本机绝对路径，例如：
 
@@ -158,7 +175,7 @@ OAuth metadata、授权和 token 端点使用同一 canonical public URL。Cloud
 - FRP：启动受管 `frpc` 并把 Gateway 暴露到配置的 HTTPS 域名。
 - Cloudflare：支持 Quick Tunnel 和 Named Tunnel；Named Tunnel 需要 Token 与固定公网 URL。
 
-`frpc` 可以自动下载到配置目录缓存。`cloudflared` 需要安装在 `PATH`、常见 Linux 路径，或放到配置目录的 `bin/cloudflared`。
+`frpc` 可以自动下载到配置目录缓存；Linux 使用对应 tar.gz，Windows x86_64 使用官方 ZIP 并缓存为 `frpc.exe`。`cloudflared` 需要安装在 `PATH`/常见平台路径，或放到配置目录的 `bin/cloudflared`（Windows 为 `cloudflared.exe`）。Windows 也可使用 `winget install Cloudflare.cloudflared`。
 
 停止 Gateway 时会停止受管公网暴露。单独重启 Gateway listener 时，运行中的受管 exposure 会尽量保留，避免固定公网连接不必要重建。
 
@@ -168,11 +185,26 @@ OAuth metadata、授权和 token 端点使用同一 canonical public URL。Cloud
 
 1. 调用 `list_workspaces`。
 2. 调用 `select_workspace` 绑定当前会话。
-3. 调用 `history_session_bootstrap`。
+3. 调用 `history_session_bootstrap`，首次请求通过 `initial_user_input` 逐字传入。
 4. 使用文件、Git、Exec、Patch 等工具。
-5. 完成任务后调用 `history_session_checkpoint`。
+5. 需要精确旧上下文时，先调用 `history_session_search` 定位档案，再用 `history_session_read` 按页读取原始 Markdown。
+6. 完成任务后调用 `history_session_checkpoint`，并通过 `raw_user_input` 传入本轮用户原始请求。
 
-项目历史保存在各工作区自己的 `docs/history-session/`，不是全局共享历史。
+History Session v2 的五个工具：
+
+| 工具 | 作用 |
+|------|------|
+| `history_session_bootstrap` | 创建或恢复当前会话，只返回有界当前状态和检索指引，不回灌全部历史 |
+| `history_session_checkpoint` | 向当前会话追加结构化进度与本轮原始用户输入；同一 turn 的修改保留 revision/supersedes 证据 |
+| `history_session_validate` | 校验档案编号和派生索引，可重建 `index.json`、`memory/state.json`、`memory/manifest.json` |
+| `history_session_search` | 按关键词搜索历史档案，返回有界的定位结果和片段 |
+| `history_session_read` | 无损读取一个数字 Markdown 档案；默认每页 32 KiB，最大 64 KiB，可用 hash 检测翻页期间的内容变化 |
+
+项目历史保存在各工作区自己的 `docs/history-session/`，不是全局共享历史。数字 Markdown `N.md` 是长期事实源；`memory/state.json` 和 `memory/manifest.json` 只是可从 Markdown 重建的有界派生数据。
+
+`history_session_bootstrap` 返回的 `session_key` 和 `current_path` 是稳定写入目标。后续 checkpoint 必须原样作为 `session_key` 和 `expected_path` 传回；即使 ChatGPT 的宿主会话元数据变化，也不会把已建立的 checkpoint 重定向到其他历史文件。
+
+服务端无法读取没有作为 MCP 参数传入的 ChatGPT 对话文本。因此首次输入和每轮输入是否完整归档，以 `initial_input_captured` / `user_input_captured` 及返回的 warnings 为准。
 
 ## 开发验证
 

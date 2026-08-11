@@ -160,10 +160,11 @@ fn merge_default_allowed_commands(configured: &str) -> HashSet<String> {
 }
 
 fn default_workspace_script_extension_set() -> HashSet<String> {
-    [".sh"]
-        .into_iter()
-        .map(str::to_string)
-        .collect()
+    #[cfg(windows)]
+    let extensions = [".exe", ".bat", ".cmd", ".ps1"].as_slice();
+    #[cfg(not(windows))]
+    let extensions = [".sh"].as_slice();
+    extensions.iter().map(|value| (*value).to_string()).collect()
 }
 
 pub fn validate_tool_arguments(
