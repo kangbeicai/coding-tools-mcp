@@ -4,6 +4,7 @@ compile_error!("coding-tools currently supports Linux only");
 mod async_runtime;
 pub mod admin;
 mod actions;
+pub mod activity;
 mod app_state;
 mod auth;
 mod data;

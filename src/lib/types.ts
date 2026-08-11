@@ -175,3 +175,55 @@ export function actionsOAuthTokenUrl(
   const base = actionsPublicBaseUrl(profile, frpProfiles);
   return base ? `${base.replace(/\/$/, "")}/oauth/token` : "";
 }
+
+export interface ActivityTrace {
+  traceId: string;
+  rpcId: string;
+  method: string;
+  tool: string;
+  sessionId: string;
+  route: string;
+  workspaceId: string;
+  workspaceName: string;
+  status: "running" | "completed" | "failed" | string;
+  startedAtMs: number;
+  finishedAtMs: number | null;
+  durationMs: number | null;
+  request: unknown;
+  response: unknown;
+  error: unknown;
+  operationId: string;
+  processSessionId: string;
+  parentTraceId: string;
+}
+
+export interface ActivityProcess {
+  sessionId: string;
+  operationId: string;
+  traceId: string;
+  workspaceName: string;
+  command: string;
+  status: string;
+  startedAtMs: number;
+  updatedAtMs: number;
+  exitCode: number | null;
+}
+
+export interface ActivitySnapshot {
+  traces: ActivityTrace[];
+  activeProcesses: ActivityProcess[];
+}
+
+export interface ActivityFilters {
+  workspace?: string;
+  session?: string;
+  tool?: string;
+  status?: string;
+  limit?: number;
+}
+
+export interface ActivityEvent {
+  kind: string;
+  trace?: ActivityTrace | null;
+  process?: ActivityProcess | null;
+}

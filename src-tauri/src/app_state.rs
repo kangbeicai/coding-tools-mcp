@@ -1,11 +1,13 @@
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
+use crate::activity::ActivityStore;
 use crate::data::DataStore;
 use crate::error::AppResult;
 use crate::gateway::{GatewayExposureProcess, GatewayProcess};
 use crate::runtime::RuntimeSupervisor;
 
 pub struct AppState {
+    pub activity: Arc<ActivityStore>,
     pub data: Mutex<DataStore>,
     pub runtime: Mutex<RuntimeSupervisor>,
     pub gateway: Mutex<Option<GatewayProcess>>,
@@ -17,6 +19,7 @@ impl AppState {
         let mut store = DataStore::load()?;
         store.init_shared_secrets()?;
         Ok(Self {
+            activity: Arc::new(ActivityStore::new()),
             data: Mutex::new(store),
             runtime: Mutex::new(RuntimeSupervisor::default()),
             gateway: Mutex::new(None),

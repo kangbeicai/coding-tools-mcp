@@ -20,7 +20,9 @@ Linux 自托管 Coding Gateway 与 Web Console。单个 `coding-tools` 进程同
 | Web Console | `http://0.0.0.0:28767/` | 浏览器管理平面 |
 | 工作区路由 | `/w/<workspace-id>/mcp` | 显式路由与调试 |
 
-Web Console 当前没有独立管理员认证。`28767` 只能暴露给可信 LAN、VPN 或受防火墙保护的网络，不应直接开放到公网。
+Web Console 使用独立的管理员登录保护。首次访问会进入 `/login` 设置管理员用户名和密码；密码只保存 Argon2 哈希。Admin session 保存在服务进程内存中，有效期为 12 小时，服务重启后需要重新登录。
+
+管理员登录与 MCP 数据平面的 OAuth/Bearer 认证彼此独立。Web Admin 默认仍通过 HTTP 监听 `0.0.0.0:28767`，登录认证并不等于传输加密；建议只暴露给可信 LAN/VPN，或在反向代理后使用 HTTPS，不要直接开放到不可信公网。
 
 ## 构建
 
@@ -59,6 +61,7 @@ coding-tools serve
 coding-tools --help
 coding-tools tui
 coding-tools workspace list
+coding-tools admin reset
 coding-tools config show
 coding-tools health
 coding-tools health --json
@@ -87,6 +90,32 @@ coding-tools serve \
 - `--admin-bind IP`
 - `--admin-port PORT`
 - `--web-root PATH`，仅用于开发或外部静态资源覆盖
+
+## Web Admin 登录与密码恢复
+
+第一次打开 Web Console 时访问：
+
+```text
+http://<server-ip>:28767/login
+```
+
+页面会要求创建管理员用户名和密码。密码不会以明文保存，配置中只持久化 Argon2 密码哈希。登录成功后浏览器使用 HttpOnly、SameSite=Strict 的 session cookie；session 最长有效 12 小时，并且只保存在 `coding-tools` 进程内存中，因此服务重启后所有 Web Admin session 都会失效。
+
+如果忘记管理员密码，在服务器本机终端执行：
+
+```bash
+coding-tools admin reset
+```
+
+该命令只会把 Admin 用户名恢复为默认 `admin` 并清空 Admin 密码哈希。它不会修改 Gateway、MCP、OAuth、Cloudflare/FRP、workspace 或其他 secret。
+
+reset 修改的是磁盘配置；正在运行的 `coding-tools` 仍持有旧的内存配置。因此 reset 后必须重启服务，然后重新打开：
+
+```text
+http://<server-ip>:28767/login
+```
+
+重新设置管理员即可。密码不可从 Argon2 哈希中找回，只能通过该流程重置。
 
 ## 配置与数据
 

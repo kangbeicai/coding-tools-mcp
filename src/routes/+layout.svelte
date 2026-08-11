@@ -6,6 +6,7 @@
   import AppShell from "$lib/components/AppShell.svelte";
   import ToastHost from "$lib/components/ToastHost.svelte";
   import WorkspaceNavItem from "$lib/components/WorkspaceNavItem.svelte";
+  import { getAdminAuthStatus, logoutAdmin } from "$lib/api/adminAuth";
   import { createWorkspace, listWorkspaces } from "$lib/api/workspaces";
   import { workspaces } from "$lib/stores/app";
   import { showToast } from "$lib/stores/toast";
@@ -37,6 +38,10 @@
     goto(`/web/workspace/${id}`);
   }
 
+  function openActivity() {
+    goto("/activity");
+  }
+
   function openGatewaySettings() {
     goto("/settings/gateway");
   }
@@ -45,49 +50,77 @@
     goto("/settings/keys");
   }
 
+  async function signOut() {
+    try {
+      await logoutAdmin();
+    } finally {
+      workspaces.set([]);
+      window.location.assign("/login");
+    }
+  }
+
   onMount(() => {
     void (async () => {
-      await refreshWorkspaces();
       const path = $page.url.pathname;
+      if (path === "/login") return;
+      const auth = await getAdminAuthStatus();
+      if (!auth.authenticated) {
+        const next = encodeURIComponent(`${$page.url.pathname}${$page.url.search}`);
+        goto(`/login?next=${next}`);
+        return;
+      }
+      await refreshWorkspaces();
       if (path === "/") {
-        goto("/settings/gateway");
+        goto("/activity");
       }
     })();
   });
 </script>
 
-<AppShell onAddWorkspace={addWorkspace}>
-  {#snippet settingsNav()}
-    <button
-      type="button"
-      class="tx-settings-link {$page.url.pathname === '/settings/gateway' ? 'active' : ''}"
-      onclick={openGatewaySettings}
-    >
-      Gateway
-    </button>
-    <button
-      type="button"
-      class="tx-settings-link {$page.url.pathname === '/settings/keys' ? 'active' : ''}"
-      onclick={openKeysSettings}
-    >
-      共享密钥
-    </button>
-  {/snippet}
-  {#snippet sidebar()}
-    <div class="space-y-1">
-      {#each $workspaces as workspace (workspace.id)}
-        <WorkspaceNavItem
-          workspace={workspace}
-          active={$page.url.pathname === `/web/workspace/${workspace.id}`}
-          onClick={() => openWorkspace(workspace.id)}
-        />
-      {/each}
-    </div>
-  {/snippet}
+{#if $page.url.pathname === "/login"}
+  {@render children()}
+{:else}
+  <AppShell onAddWorkspace={addWorkspace}>
+    {#snippet settingsNav()}
+      <button
+        type="button"
+        class="tx-settings-link {$page.url.pathname === '/activity' ? 'active' : ''}"
+        onclick={openActivity}
+      >
+        Activity
+      </button>
+      <button
+        type="button"
+        class="tx-settings-link {$page.url.pathname === '/settings/gateway' ? 'active' : ''}"
+        onclick={openGatewaySettings}
+      >
+        Gateway
+      </button>
+      <button
+        type="button"
+        class="tx-settings-link {$page.url.pathname === '/settings/keys' ? 'active' : ''}"
+        onclick={openKeysSettings}
+      >
+        共享密钥
+      </button>
+      <button type="button" class="tx-settings-link" onclick={signOut}>退出登录</button>
+    {/snippet}
+    {#snippet sidebar()}
+      <div class="space-y-1">
+        {#each $workspaces as workspace (workspace.id)}
+          <WorkspaceNavItem
+            workspace={workspace}
+            active={$page.url.pathname === `/web/workspace/${workspace.id}`}
+            onClick={() => openWorkspace(workspace.id)}
+          />
+        {/each}
+      </div>
+    {/snippet}
 
-  {#snippet children()}
-    {@render children()}
-  {/snippet}
-</AppShell>
+    {#snippet children()}
+      {@render children()}
+    {/snippet}
+  </AppShell>
+{/if}
 
 <ToastHost />

@@ -27,6 +27,7 @@ pub fn run_from_env() -> Result<(), String> {
         Some("serve") => run_server(false, &args[1..]),
         Some("tui") => run_server(true, &args[1..]),
         Some("workspace") => workspace_command(&args[1..]),
+        Some("admin") => admin_command(&args[1..]),
         Some("config") => config_command(&args[1..]),
         Some("service") => service_command(&args[1..]),
         Some("install-service") => service_install_command(&args[1..]),
@@ -37,6 +38,36 @@ pub fn run_from_env() -> Result<(), String> {
             "未知命令: {other}\n运行 `coding-tools --help` 查看用法"
         )),
     }
+}
+
+fn admin_command(args: &[String]) -> Result<(), String> {
+    match args.first().map(String::as_str) {
+        Some("reset") => admin_reset_command(&args[1..]),
+        Some(other) => Err(format!("未知 admin 子命令: {other}；当前仅支持 reset")),
+        None => Err("admin 需要子命令；当前仅支持 `coding-tools admin reset`".into()),
+    }
+}
+
+fn admin_reset_command(args: &[String]) -> Result<(), String> {
+    if !args.is_empty() {
+        return Err("admin reset 不接受额外参数".into());
+    }
+
+    let admin_port = crate::data::DataStore::update_file(|data| {
+        reset_admin_credentials(&mut data.admin);
+        Ok(data.admin.local_port)
+    })
+        .map_err(|error| error.to_string())?;
+
+    println!("Web Admin 管理员凭据已重置。");
+    println!("请重启正在运行的 coding-tools，然后打开 http://127.0.0.1:{admin_port}/login 重新设置管理员。");
+    println!("Gateway、MCP、OAuth、workspace、Cloudflare/FRP 与其他密钥均未修改。");
+    Ok(())
+}
+
+fn reset_admin_credentials(admin: &mut AdminConfig) {
+    admin.username = "admin".to_string();
+    admin.password_hash.clear();
 }
 
 async fn health_via_admin(
@@ -250,6 +281,7 @@ fn run_server(tui: bool, args: &[String]) -> Result<(), String> {
         .with_settings(|store| Ok(store.settings().admin))
         .map_err(|error| error.to_string())?;
     let admin_port = admin_config.local_port;
+    let admin_configured = !admin_config.password_hash.trim().is_empty();
     let admin = spawn_admin_listener(app.clone(), admin_config, web_root)?;
     let gateway_start = crate::async_runtime::block_on(start_gateway_service(&app));
     let exposure_mode = app
@@ -310,7 +342,11 @@ fn run_server(tui: bool, args: &[String]) -> Result<(), String> {
         println!("Web Admin access:");
         println!("  listen: {}", admin.local_endpoint);
         println!("  from LAN: http://<server-ip>:{admin_port}");
-        println!("  note: Admin currently has no independent administrator authentication.");
+        if admin_configured {
+            println!("  auth: administrator login required");
+        } else {
+            println!("  auth: first-time administrator setup required at /login");
+        }
         println!("Press Ctrl+C to stop.");
 
         crate::async_runtime::block_on(async {
@@ -568,6 +604,7 @@ fn print_help() {
     println!("  coding-tools serve [gateway/admin overrides]");
     println!("  coding-tools tui   [gateway/admin overrides]  # optional terminal monitor");
     println!("  coding-tools workspace list");
+    println!("  coding-tools admin reset                 # reset Web Admin credentials");
     println!("  coding-tools config show");
     println!("  coding-tools health [--json]");
     println!();
@@ -586,4 +623,30 @@ fn print_help() {
     println!();
     println!("Advanced optional service mode:");
     println!("  coding-tools service install|status|uninstall");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn admin_reset_only_changes_admin_login_fields() {
+        let mut settings = crate::settings::AppSettings::default();
+        settings.admin.username = "forgotten-user".into();
+        settings.admin.password_hash = "$argon2id$example".into();
+        settings.gateway.public_url = "https://mcp.example.test".into();
+        settings
+            .shared_secrets
+            .insert("bearer_token".into(), "keep-me".into());
+
+        reset_admin_credentials(&mut settings.admin);
+
+        assert_eq!(settings.admin.username, "admin");
+        assert!(settings.admin.password_hash.is_empty());
+        assert_eq!(settings.gateway.public_url, "https://mcp.example.test");
+        assert_eq!(
+            settings.shared_secrets.get("bearer_token").map(String::as_str),
+            Some("keep-me")
+        );
+    }
 }

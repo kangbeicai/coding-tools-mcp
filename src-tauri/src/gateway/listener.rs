@@ -9,6 +9,7 @@ use serde_json::{json, Value};
 use tokio::sync::oneshot;
 use tower_http::cors::CorsLayer;
 
+use crate::activity::ActivityStore;
 use crate::auth::{
     authorization_server_metadata, authorize_get, authorize_post, external_base_url,
     protected_resource_metadata, token_exchange, verify_bearer_header, verify_oauth_bearer_header,
@@ -27,12 +28,22 @@ const GATEWAY_LOG_ID: &str = "gateway";
 #[derive(Clone)]
 struct ListenerState {
     gateway: SharedGatewayState,
+    activity: Arc<ActivityStore>,
     auth: AuthConfig,
     bind_port: u16,
     configured_public_url: Arc<RwLock<String>>,
     bearer_token: Option<String>,
     oauth: Option<Arc<OAuthRuntime>>,
     oauth_client_secret: Option<String>,
+}
+
+fn request_session_key(body: &Value) -> Option<&str> {
+    body.get("params")
+        .and_then(|params| params.get("_meta"))
+        .and_then(|meta| meta.get("openai/session"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
 }
 
 pub struct GatewayProcess {
@@ -53,6 +64,7 @@ pub fn spawn_listener(
     config: GatewayConfig,
     profiles: Vec<WorkspaceProfile>,
     initial_public_url: Option<&str>,
+    activity: Arc<ActivityStore>,
 ) -> Result<GatewayProcess, String> {
     let client_id = SecretStore::get_shared("oauth_client_id")
         .map_err(|error| error.to_string())?
@@ -127,6 +139,7 @@ pub fn spawn_listener(
     let listener = bind_listener(&bind_host, port)?;
     let state = ListenerState {
         gateway: gateway.clone(),
+        activity,
         auth,
         bind_port: port,
         configured_public_url: configured_public_url.clone(),
@@ -264,7 +277,21 @@ async fn dispatch_request(
         .unwrap_or("")
         .to_string();
     let transport_session = session_key_from_headers(&headers).map(str::to_string);
+    let effective_session = request_session_key(&body)
+        .map(str::to_string)
+        .or_else(|| transport_session.clone());
     let route_label = forced_workspace.as_deref().unwrap_or("session");
+    let workspace_before = state
+        .gateway
+        .current_workspace(effective_session.as_deref(), forced_workspace.as_deref())
+        .ok();
+    let trace_id = state.activity.begin_trace(
+        &body,
+        effective_session.as_deref(),
+        route_label,
+        workspace_before.as_ref(),
+    );
+    let trace_body = body.clone();
     append_profile_log(
         GATEWAY_LOG_ID,
         "mcp-requests.log",
@@ -275,18 +302,30 @@ async fn dispatch_request(
     );
 
     let gateway = state.gateway.clone();
+    let worker_session = transport_session.clone();
+    let worker_workspace = forced_workspace.clone();
     let result = tokio::task::spawn_blocking(move || {
         handle_request(
             &gateway,
             &body,
-            transport_session.as_deref(),
-            forced_workspace.as_deref(),
+            worker_session.as_deref(),
+            worker_workspace.as_deref(),
         )
     })
     .await;
 
     match result {
         Ok(response) => {
+            let workspace_after = state
+                .gateway
+                .current_workspace(effective_session.as_deref(), forced_workspace.as_deref())
+                .ok();
+            state.activity.complete_trace(
+                &trace_id,
+                &trace_body,
+                &response,
+                workspace_after.as_ref(),
+            );
             append_profile_log(
                 GATEWAY_LOG_ID,
                 "mcp-requests.log",
@@ -297,16 +336,28 @@ async fn dispatch_request(
             );
             Json(response).into_response()
         }
-        Err(error) => Json(json!({
-            "jsonrpc": "2.0",
-            "id": request_id,
-            "error": {
-                "code": -32603,
-                "message": "Gateway RPC worker failed",
-                "data": { "error": error.to_string(), "retryable": true }
-            }
-        }))
-        .into_response(),
+        Err(error) => {
+            let response = json!({
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "error": {
+                    "code": -32603,
+                    "message": "Gateway RPC worker failed",
+                    "data": { "error": error.to_string(), "retryable": true }
+                }
+            });
+            let workspace_after = state
+                .gateway
+                .current_workspace(effective_session.as_deref(), forced_workspace.as_deref())
+                .ok();
+            state.activity.complete_trace(
+                &trace_id,
+                &trace_body,
+                &response,
+                workspace_after.as_ref(),
+            );
+            Json(response).into_response()
+        }
     }
 }
 

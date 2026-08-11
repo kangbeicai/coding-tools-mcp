@@ -13,6 +13,10 @@ pub struct AdminConfig {
     pub bind_host: String,
     #[serde(default = "default_admin_port")]
     pub local_port: u16,
+    #[serde(default = "default_admin_username")]
+    pub username: String,
+    #[serde(default)]
+    pub password_hash: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -73,11 +77,17 @@ fn default_admin_port() -> u16 {
     28767
 }
 
+fn default_admin_username() -> String {
+    "admin".to_string()
+}
+
 impl Default for AdminConfig {
     fn default() -> Self {
         Self {
             bind_host: default_admin_bind_host(),
             local_port: default_admin_port(),
+            username: default_admin_username(),
+            password_hash: String::new(),
         }
     }
 }

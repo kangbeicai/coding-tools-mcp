@@ -6,6 +6,7 @@
 //! the static Svelte application and a small JSON RPC surface backed by the
 //! same application state as the Gateway runtime.
 
+mod auth;
 mod listener;
 mod rpc;
 

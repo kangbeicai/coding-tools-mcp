@@ -14,6 +14,10 @@ export async function invokeCommand<T>(
     body: JSON.stringify({ command, args }),
   });
   const payload = (await response.json()) as WebRpcResponse<T>;
+  if (response.status === 401 && typeof window !== "undefined") {
+    const next = encodeURIComponent(`${window.location.pathname}${window.location.search}`);
+    window.location.assign(`/login?next=${next}`);
+  }
   if (!response.ok || !payload.ok) {
     throw new Error(payload.error || `Admin API request failed: ${response.status}`);
   }

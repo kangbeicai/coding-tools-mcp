@@ -1,6 +1,7 @@
 use serde::Deserialize;
 use serde_json::{json, Value};
 
+use crate::activity::ActivityQuery;
 use crate::app_state::{bootstrap_workspace, teardown_workspace, AppState};
 use crate::error::{AppError, AppResult};
 use crate::gateway::{
@@ -76,6 +77,14 @@ pub async fn dispatch(state: &AppState, request: RpcRequest) -> Result<Value, St
 
 async fn dispatch_inner(state: &AppState, request: RpcRequest) -> AppResult<Value> {
     match request.command.as_str() {
+        "list_activity" => {
+            let query: ActivityQuery = serde_json::from_value(request.args.clone())?;
+            serde_value(state.activity.snapshot(&query))
+        }
+        "get_activity" => {
+            let trace_id = arg_str(&request.args, "traceId")?;
+            serde_value(state.activity.get(&trace_id))
+        }
         "list_workspaces" => state.with_workspaces(|store| serde_value(store.list())),
         "create_workspace" => {
             let path = arg_str(&request.args, "path")?;
@@ -190,7 +199,15 @@ async fn dispatch_inner(state: &AppState, request: RpcRequest) -> AppResult<Valu
         "start_gateway" => serde_value(start_gateway_service(state).await?),
         "stop_gateway" => serde_value(stop_gateway_service(state).await?),
         "restart_gateway" => serde_value(restart_gateway_service(state).await?),
-        "get_admin_config" => state.with_settings(|store| serde_value(store.settings().admin)),
+        "get_admin_config" => state.with_settings(|store| {
+            let admin = store.settings().admin;
+            serde_value(json!({
+                "bindHost": admin.bind_host,
+                "localPort": admin.local_port,
+                "username": admin.username,
+                "configured": !admin.password_hash.trim().is_empty(),
+            }))
+        }),
         "list_frp_profiles" => state.with_settings(|store| {
             let profiles: Vec<Value> = store
                 .data()

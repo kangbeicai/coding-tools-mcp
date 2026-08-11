@@ -20,7 +20,9 @@ A self-hosted Linux Coding Gateway and browser Web Console. One `coding-tools` p
 | Web Console | `http://0.0.0.0:28767/` | Browser management plane |
 | Workspace route | `/w/<workspace-id>/mcp` | Explicit routing and diagnostics |
 
-The Web Console does not yet have separate administrator authentication. Restrict port `28767` to a trusted LAN, VPN, or firewall-protected network.
+The Web Console has separate administrator authentication. First access goes through `/login`, where you create the administrator username and password. Only an Argon2 password hash is persisted. Admin sessions live in process memory for up to 12 hours, so a server restart requires signing in again.
+
+Web Admin authentication is separate from MCP OAuth/Bearer authentication. The Admin listener still defaults to plain HTTP on `0.0.0.0:28767`; authentication does not provide transport encryption. Keep it on a trusted LAN/VPN or place it behind an HTTPS reverse proxy instead of exposing it directly to an untrusted Internet.
 
 ## Build
 
@@ -53,6 +55,7 @@ Useful commands:
 coding-tools serve
 coding-tools tui
 coding-tools workspace list
+coding-tools admin reset
 coding-tools config show
 coding-tools health --json
 coding-tools service install
@@ -72,6 +75,26 @@ coding-tools serve \
 ```
 
 Supported flags are `--bind`, `--port`, `--public-url`, `--auth`, `--admin-bind`, `--admin-port`, and the development-only `--web-root` override.
+
+## Web Admin login and password recovery
+
+On first use, open:
+
+```text
+http://<server-ip>:28767/login
+```
+
+The page asks you to create the administrator username and password. The password is never stored in plaintext; only its Argon2 hash is persisted. After login the browser uses an HttpOnly, SameSite=Strict session cookie. Sessions last up to 12 hours and are stored only in the `coding-tools` process, so restarting the service invalidates all Admin sessions.
+
+If you forget the administrator password, run this locally on the server:
+
+```bash
+coding-tools admin reset
+```
+
+The command only restores the Admin username to the default `admin` value and clears the Admin password hash. It does not change Gateway, MCP, OAuth, Cloudflare/FRP, workspace, or other secret configuration.
+
+The reset command updates persisted configuration, while an already running `coding-tools` process still has the old settings in memory. Restart the service after the reset, then open `/login` again and create the administrator credentials. The original password cannot be recovered from the Argon2 hash; it can only be reset.
 
 ## Configuration
 

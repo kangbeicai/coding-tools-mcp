@@ -53,8 +53,13 @@ async fn start_gateway_listener(
         store.init_shared_secrets()?;
         Ok((store.settings().gateway, store.list().to_vec()))
     })?;
-    let process =
-        spawn_listener(config, profiles, initial_public_url).map_err(AppError::Message)?;
+    let process = spawn_listener(
+        config,
+        profiles,
+        initial_public_url,
+        state.activity.clone(),
+    )
+    .map_err(AppError::Message)?;
     state.with_gateway(|slot| {
         *slot = Some(process);
         Ok(())

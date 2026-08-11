@@ -1,14 +1,22 @@
+use std::convert::Infallible;
 use std::path::{Component, PathBuf};
 use std::sync::Arc;
 
 use axum::body::Body;
 use axum::extract::{OriginalUri, State};
-use axum::http::{header, HeaderValue, StatusCode};
-use axum::response::{IntoResponse, Response};
+use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
+use axum::response::sse::{Event, KeepAlive, Sse};
+use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use tokio::sync::oneshot;
+use tokio_stream::wrappers::BroadcastStream;
+use tokio_stream::StreamExt;
 
+use crate::admin::auth::{
+    clear_session_cookie, hash_password, session_cookie, validate_credentials, verify_password,
+    AdminCredentials, AdminSessionStore,
+};
 use crate::admin::rpc::{dispatch, failure, success, RpcRequest};
 use crate::admin::{embedded_web_asset, embedded_web_asset_count};
 use crate::app_state::AppState;
@@ -17,7 +25,72 @@ use crate::settings::AdminConfig;
 #[derive(Clone)]
 struct AdminState {
     app: Arc<AppState>,
+    sessions: Arc<AdminSessionStore>,
     web_root: PathBuf,
+}
+
+fn admin_config(state: &AdminState) -> Result<AdminConfig, String> {
+    state
+        .app
+        .with_settings(|store| Ok(store.settings().admin))
+        .map_err(|error| error.to_string())
+}
+
+fn authenticated_response(state: &AdminState, username: String) -> Response {
+    let token = state.sessions.create();
+    let mut response = Json(serde_json::json!({
+        "ok": true,
+        "configured": true,
+        "authenticated": true,
+        "username": username,
+    }))
+    .into_response();
+    set_cookie(&mut response, &session_cookie(&token));
+    response
+}
+
+fn unauthorized_response() -> Response {
+    auth_error(StatusCode::UNAUTHORIZED, "需要管理员登录".into())
+}
+
+fn auth_error(status: StatusCode, message: String) -> Response {
+    (status, Json(serde_json::json!({"ok": false, "error": message}))).into_response()
+}
+
+fn set_cookie(response: &mut Response, cookie: &str) {
+    if let Ok(value) = HeaderValue::from_str(cookie) {
+        response.headers_mut().append(header::SET_COOKIE, value);
+    }
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("no-store"),
+    );
+}
+
+fn is_public_web_path(path: &str) -> bool {
+    matches!(path, "login" | "login/")
+        || path.starts_with("_app/")
+        || path.rsplit('/').next().is_some_and(|name| name.contains('.'))
+}
+
+async fn activity_events(
+    State(state): State<AdminState>,
+    headers: HeaderMap,
+) -> Response {
+    if !state.sessions.is_authenticated(&headers) {
+        return unauthorized_response();
+    }
+    let stream = BroadcastStream::new(state.app.activity.subscribe()).filter_map(|result| {
+        let event = result.ok()?;
+        let kind = event.kind.clone();
+        let data = serde_json::to_string(&event).ok()?;
+        Some(Ok::<Event, Infallible>(
+            Event::default().event(kind).data(data),
+        ))
+    });
+    Sse::new(stream)
+        .keep_alive(KeepAlive::default())
+        .into_response()
 }
 
 pub struct AdminProcess {
@@ -51,7 +124,11 @@ pub fn spawn_admin_listener(
     } else {
         "unavailable".into()
     };
-    let state = AdminState { app, web_root };
+    let state = AdminState {
+        app,
+        sessions: Arc::new(AdminSessionStore::default()),
+        web_root,
+    };
     let endpoint = match bind_ip {
         std::net::IpAddr::V4(ip) => format!("http://{ip}:{}", config.local_port),
         std::net::IpAddr::V6(ip) => format!("http://[{ip}]:{}", config.local_port),
@@ -66,8 +143,13 @@ pub fn spawn_admin_listener(
             }
         };
         let app = Router::new()
+            .route("/api/auth/status", get(auth_status))
+            .route("/api/auth/setup", post(auth_setup))
+            .route("/api/auth/login", post(auth_login))
+            .route("/api/auth/logout", post(auth_logout))
             .route("/api/rpc", post(rpc_post))
             .route("/api/health", get(api_health))
+            .route("/api/activity/events", get(activity_events))
             .fallback(get(static_file))
             .with_state(state);
         if let Err(error) = axum::serve(listener, app)
@@ -88,7 +170,85 @@ pub fn spawn_admin_listener(
     })
 }
 
-async fn rpc_post(State(state): State<AdminState>, Json(request): Json<RpcRequest>) -> Response {
+async fn auth_status(State(state): State<AdminState>, headers: HeaderMap) -> Response {
+    let config = match admin_config(&state) {
+        Ok(config) => config,
+        Err(error) => return auth_error(StatusCode::INTERNAL_SERVER_ERROR, error),
+    };
+    let configured = !config.password_hash.trim().is_empty();
+    let authenticated = configured && state.sessions.is_authenticated(&headers);
+    Json(serde_json::json!({
+        "ok": true,
+        "configured": configured,
+        "authenticated": authenticated,
+        "username": config.username,
+    }))
+    .into_response()
+}
+
+async fn auth_setup(
+    State(state): State<AdminState>,
+    Json(credentials): Json<AdminCredentials>,
+) -> Response {
+    if let Err(error) = validate_credentials(&credentials) {
+        return auth_error(StatusCode::BAD_REQUEST, error);
+    }
+    let password_hash = match hash_password(&credentials.password) {
+        Ok(hash) => hash,
+        Err(error) => return auth_error(StatusCode::INTERNAL_SERVER_ERROR, error),
+    };
+    let username = credentials.username.trim().to_string();
+    let update = state.app.with_settings(|store| {
+        let mut settings = store.settings();
+        if !settings.admin.password_hash.trim().is_empty() {
+            return Err(crate::error::AppError::Message(
+                "管理员已完成初始化，请直接登录".into(),
+            ));
+        }
+        settings.admin.username = username.clone();
+        settings.admin.password_hash = password_hash.clone();
+        store.update_settings(settings)
+    });
+    if let Err(error) = update {
+        return auth_error(StatusCode::CONFLICT, error.to_string());
+    }
+    authenticated_response(&state, username)
+}
+
+async fn auth_login(
+    State(state): State<AdminState>,
+    Json(credentials): Json<AdminCredentials>,
+) -> Response {
+    let config = match admin_config(&state) {
+        Ok(config) => config,
+        Err(error) => return auth_error(StatusCode::INTERNAL_SERVER_ERROR, error),
+    };
+    if config.password_hash.trim().is_empty() {
+        return auth_error(StatusCode::CONFLICT, "请先设置管理员账号".into());
+    }
+    if credentials.username.trim() != config.username
+        || !verify_password(&credentials.password, &config.password_hash)
+    {
+        return auth_error(StatusCode::UNAUTHORIZED, "用户名或密码错误".into());
+    }
+    authenticated_response(&state, config.username)
+}
+
+async fn auth_logout(State(state): State<AdminState>, headers: HeaderMap) -> Response {
+    state.sessions.revoke_from_headers(&headers);
+    let mut response = Json(serde_json::json!({"ok": true})).into_response();
+    set_cookie(&mut response, &clear_session_cookie());
+    response
+}
+
+async fn rpc_post(
+    State(state): State<AdminState>,
+    headers: HeaderMap,
+    Json(request): Json<RpcRequest>,
+) -> Response {
+    if !state.sessions.is_authenticated(&headers) {
+        return unauthorized_response();
+    }
     match dispatch(&state.app, request).await {
         Ok(value) => Json(success(value)).into_response(),
         Err(message) => (StatusCode::BAD_REQUEST, Json(failure(message))).into_response(),
@@ -103,8 +263,16 @@ async fn api_health() -> Json<serde_json::Value> {
     }))
 }
 
-async fn static_file(State(state): State<AdminState>, OriginalUri(uri): OriginalUri) -> Response {
-    let relative = uri.path().trim_start_matches('/');
+async fn static_file(
+    State(state): State<AdminState>,
+    OriginalUri(uri): OriginalUri,
+    headers: HeaderMap,
+) -> Response {
+    let raw_relative = uri.path().trim_start_matches('/');
+    if !is_public_web_path(raw_relative) && !state.sessions.is_authenticated(&headers) {
+        return Redirect::temporary("/login").into_response();
+    }
+    let relative = raw_relative;
     let relative = if relative.is_empty() {
         "index.html"
     } else {
@@ -216,5 +384,15 @@ mod tests {
     fn static_path_rejects_parent_traversal() {
         assert!(safe_relative_path("../data/profiles.json").is_none());
         assert!(safe_relative_path("_app/app.js").is_some());
+    }
+
+    #[test]
+    fn only_login_and_static_assets_are_public_web_paths() {
+        assert!(is_public_web_path("login"));
+        assert!(is_public_web_path("_app/immutable/app.js"));
+        assert!(is_public_web_path("favicon.ico"));
+        assert!(!is_public_web_path(""));
+        assert!(!is_public_web_path("activity"));
+        assert!(!is_public_web_path("settings/gateway"));
     }
 }
