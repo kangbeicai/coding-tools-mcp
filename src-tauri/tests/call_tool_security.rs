@@ -210,20 +210,56 @@ fn deleting_git_assets_is_always_rejected() {
 }
 
 #[test]
-fn patch_check_rejects_all_git_and_github_writes() {
+fn patch_rejects_git_writes_even_when_confirmed() {
     let fx = tiny_js_fixture();
     let ctx = ctx_for(&fx.root);
-    for path in [".git/probe.txt", ".github/probe.yml"] {
-        let out = invoke(
-            &ctx,
-            "apply_patch",
-            json!({
-                "dry_run": true,
-                "patch": format!("*** Begin Patch\n*** Add File: {path}\n+probe\n*** End Patch\n")
-            }),
-        );
-        assert_eq!(out["error"]["code"], "PROTECTED_REPOSITORY_ASSET");
-    }
+    let out = invoke(
+        &ctx,
+        "apply_patch",
+        json!({
+            "confirm": true,
+            "dry_run": true,
+            "patch": "*** Begin Patch\n*** Add File: .git/probe.txt\n+probe\n*** End Patch\n"
+        }),
+    );
+    assert_eq!(out["error"]["code"], "PROTECTED_REPOSITORY_ASSET");
+}
+
+#[test]
+fn patch_requires_confirmation_for_github_writes() {
+    let fx = tiny_js_fixture();
+    let ctx = ctx_for(&fx.root);
+    let out = invoke(
+        &ctx,
+        "apply_patch",
+        json!({
+            "dry_run": true,
+            "patch": "*** Begin Patch\n*** Add File: .github/workflows/probe.yml\n+name: Probe\n*** End Patch\n"
+        }),
+    );
+    assert_eq!(
+        out["error"]["code"],
+        "DANGEROUS_OPERATION_REQUIRES_CONFIRMATION"
+    );
+}
+
+#[test]
+fn patch_allows_confirmed_github_writes() {
+    let fx = tiny_js_fixture();
+    let ctx = ctx_for(&fx.root);
+    let out = invoke(
+        &ctx,
+        "apply_patch",
+        json!({
+            "confirm": true,
+            "patch": "*** Begin Patch\n*** Add File: .github/workflows/probe.yml\n+name: Probe\n*** End Patch\n"
+        }),
+    );
+    assert_eq!(out["ok"], true);
+    assert_eq!(
+        fs::read_to_string(fx.root.join(".github/workflows/probe.yml")).unwrap(),
+        "name: Probe\n"
+    );
 }
 
 #[test]

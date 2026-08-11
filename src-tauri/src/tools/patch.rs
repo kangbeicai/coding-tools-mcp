@@ -33,10 +33,19 @@ pub fn apply_patch(ctx: &ToolContext, args: &Value) -> Result<Value, WorkspaceEr
         .map(|file| file.path.as_str())
     {
         return Err(protected_repository_asset(format!(
-            "禁止删除仓库保护资产: {path}"
+            "禁止修改 Git 仓库内部资产: {path}"
         )));
     }
     if !confirm {
+        if let Some(path) = file_patches
+            .iter()
+            .find(|file| is_confirmable_repository_asset(&file.path))
+            .map(|file| file.path.as_str())
+        {
+            return Err(dangerous_operation(format!(
+                "修改 .github 仓库配置需要 confirm=true: {path}"
+            )));
+        }
         if let Some(path) = file_patches
             .iter()
             .find(|file| file.is_deleted && is_critical_file(&file.path))
@@ -55,7 +64,11 @@ pub fn apply_patch(ctx: &ToolContext, args: &Value) -> Result<Value, WorkspaceEr
     for fp in &file_patches {
         ws.reject_unsafe_text(&fp.path)?;
         let resolved = if fp.is_new_file {
-            ws.resolve_for_write(&fp.path)?
+            if confirm && is_confirmable_repository_asset(&fp.path) {
+                ws.resolve_for_write_allowing_github(&fp.path)?
+            } else {
+                ws.resolve_for_write(&fp.path)?
+            }
         } else {
             ws.resolve_existing(&fp.path)?
         };
@@ -97,7 +110,7 @@ pub fn apply_patch(ctx: &ToolContext, args: &Value) -> Result<Value, WorkspaceEr
     let files_deleted = affected_paths(&affected, "delete");
 
     if !dry_run {
-        let _transaction_backups = commit_staged(ws, &staged)?;
+        let _transaction_backups = commit_staged(ws, &staged, confirm)?;
         let change_id = Uuid::new_v4().simple().to_string();
         return Ok(tool_ok(json!({
             "dry_run": false,
@@ -410,6 +423,7 @@ fn find_hunk_position(lines: &[String], pattern: &[String], start: usize) -> Opt
 fn commit_staged(
     ws: &Workspace,
     staged: &HashMap<String, Option<String>>,
+    allow_github: bool,
 ) -> Result<HashMap<PathBuf, Option<Vec<u8>>>, WorkspaceError> {
     let staged_bytes = staged
         .iter()
@@ -420,19 +434,26 @@ fn commit_staged(
             )
         })
         .collect::<HashMap<_, _>>();
-    commit_staged_bytes(ws, &staged_bytes)
+    commit_staged_bytes_with_github(ws, &staged_bytes, allow_github)
 }
 
-pub(crate) fn commit_staged_bytes(
+fn commit_staged_bytes_with_github(
     ws: &Workspace,
     staged: &HashMap<String, Option<Vec<u8>>>,
+    allow_github: bool,
 ) -> Result<HashMap<PathBuf, Option<Vec<u8>>>, WorkspaceError> {
     let mut backups: HashMap<PathBuf, Option<Vec<u8>>> = HashMap::new();
     let mut temporary_files = HashMap::new();
     for (rel, content) in staged {
-        ws.reject_protected_write_path(rel)?;
+        if allow_github {
+            ws.reject_protected_write_path_allowing_github(rel)?;
+        } else {
+            ws.reject_protected_write_path(rel)?;
+        }
         let resolved = if content.is_none() {
             ws.resolve_existing(rel)?
+        } else if allow_github {
+            ws.resolve_for_write_allowing_github(rel)?
         } else {
             ws.resolve_for_write(rel)?
         };
@@ -466,6 +487,8 @@ pub(crate) fn commit_staged_bytes(
     for (rel, content) in staged {
         let resolved = if content.is_none() {
             ws.resolve_existing(rel)?
+        } else if allow_github {
+            ws.resolve_for_write_allowing_github(rel)?
         } else {
             ws.resolve_for_write(rel)?
         };
@@ -542,7 +565,13 @@ fn is_critical_file(path: &str) -> bool {
 fn is_protected_repository_asset(path: &str) -> bool {
     let normalized = path.replace('\\', "/");
     let first = normalized.split('/').next().unwrap_or("");
-    matches!(first, ".git" | ".github")
+    first == ".git"
+}
+
+fn is_confirmable_repository_asset(path: &str) -> bool {
+    let normalized = path.replace('\\', "/");
+    let first = normalized.split('/').next().unwrap_or("");
+    first == ".github"
 }
 
 fn dangerous_operation(message: impl Into<String>) -> WorkspaceError {

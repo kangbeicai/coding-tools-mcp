@@ -245,8 +245,23 @@ impl Workspace {
     }
 
     pub fn resolve_for_write(&self, raw_path: &str) -> WorkspaceResult<ResolvedPath> {
+        self.resolve_for_write_with_github(raw_path, false)
+    }
+
+    pub(crate) fn resolve_for_write_allowing_github(
+        &self,
+        raw_path: &str,
+    ) -> WorkspaceResult<ResolvedPath> {
+        self.resolve_for_write_with_github(raw_path, true)
+    }
+
+    fn resolve_for_write_with_github(
+        &self,
+        raw_path: &str,
+        allow_github: bool,
+    ) -> WorkspaceResult<ResolvedPath> {
         self.reject_unsafe_text(raw_path)?;
-        self.reject_protected_write_path(raw_path)?;
+        self.reject_protected_write_path_with_github(raw_path, allow_github)?;
         let pure = Path::new(raw_path);
         if pure.file_name().is_none() || raw_path == "." || raw_path == ".." {
             return Err(WorkspaceError::invalid_argument("Invalid write target"));
@@ -338,9 +353,24 @@ impl Workspace {
     }
 
     pub fn reject_protected_write_path(&self, raw_path: &str) -> WorkspaceResult<()> {
+        self.reject_protected_write_path_with_github(raw_path, false)
+    }
+
+    pub(crate) fn reject_protected_write_path_allowing_github(
+        &self,
+        raw_path: &str,
+    ) -> WorkspaceResult<()> {
+        self.reject_protected_write_path_with_github(raw_path, true)
+    }
+
+    fn reject_protected_write_path_with_github(
+        &self,
+        raw_path: &str,
+        allow_github: bool,
+    ) -> WorkspaceResult<()> {
         let normalized = raw_path.replace('\\', "/");
         let first = normalized.split('/').next().unwrap_or("");
-        if matches!(first, ".git" | ".github") {
+        if first == ".git" || (first == ".github" && !allow_github) {
             return Err(WorkspaceError::Tool {
                 code: "PROTECTED_PATH",
                 message: format!("禁止普通文件操作写入受保护目录: {raw_path}"),
