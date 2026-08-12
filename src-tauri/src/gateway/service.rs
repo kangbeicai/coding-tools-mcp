@@ -46,6 +46,19 @@ async fn start_gateway_listener(
     state: &AppState,
     initial_public_url: Option<&str>,
 ) -> AppResult<GatewayStatusDto> {
+    let stale_process = state.with_gateway(|slot| {
+        if slot
+            .as_ref()
+            .is_some_and(|process| process.handle.is_finished())
+        {
+            Ok(slot.take())
+        } else {
+            Ok(None)
+        }
+    })?;
+    if let Some(process) = stale_process {
+        let _ = process.handle.await;
+    }
     if state.with_gateway(|process| Ok(process.is_some()))? {
         return gateway_status(state);
     }
