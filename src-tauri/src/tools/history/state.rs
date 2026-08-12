@@ -1,10 +1,14 @@
 use std::collections::BTreeSet;
+use std::path::Path;
 
 use sha2::{Digest, Sha256};
 
+use crate::tools::workspace::WorkspaceResult;
+
 use super::markdown;
 use super::model::{
-    HistoryDocument, ManifestEntry, MemoryManifest, MemoryReference, MemoryState, ScanReport,
+    DerivedSnapshot, HistoryDocument, ManifestEntry, MemoryManifest, MemoryReference, MemoryState,
+    ScanReport,
 };
 use super::storage;
 
@@ -31,6 +35,23 @@ pub(super) fn build_manifest(report: &ScanReport) -> MemoryManifest {
     }
 }
 
+fn open_items_reference(
+    manifest: &MemoryManifest,
+    current_number: Option<u64>,
+) -> Option<MemoryReference> {
+    current_number.and_then(|number| {
+        manifest
+            .entries
+            .iter()
+            .find(|entry| entry.number == number)
+            .map(|entry| MemoryReference {
+                number: entry.number,
+                path: entry.path.clone(),
+                reason: "当前 session 最新 checkpoint 的未决事项快照".into(),
+            })
+    })
+}
+
 pub(super) fn build_state(
     report: &ScanReport,
     manifest: &MemoryManifest,
@@ -40,18 +61,48 @@ pub(super) fn build_state(
 ) -> MemoryState {
     let current_document = current_document(report, current_number);
     let current_focus = focus_text(current_document);
-    let (recent_changes, open_items) = bounded_progress(report);
+    let (recent_changes, open_items, has_checkpoint) = current_progress(current_document);
     MemoryState {
-        version: 2,
+        version: 3,
         state_revision,
         archive_revision: manifest.archive_revision.clone(),
         generated_at: timestamp.to_string(),
+        projection_scope: "current_session_latest_checkpoint".into(),
+        state_revision_semantics: "local_derived_generation_not_monotonic".into(),
         current_session: current_reference(manifest, current_number),
         current_focus: truncate_text(&current_focus, STATE_FOCUS_LIMIT),
         recent_changes,
         open_items,
+        open_items_source: has_checkpoint
+            .then(|| open_items_reference(manifest, current_number))
+            .flatten(),
         references: recent_references(manifest, current_number),
     }
+}
+
+pub(super) fn refresh_derived(
+    history_dir: &Path,
+    report: &ScanReport,
+    current_number: Option<u64>,
+    timestamp: &str,
+) -> WorkspaceResult<(MemoryManifest, MemoryState)> {
+    let manifest = build_manifest(report);
+    let revision = storage::read_state(history_dir)
+        .ok()
+        .flatten()
+        .map(|state| state.state_revision + 1)
+        .unwrap_or(1);
+    let current_state = build_state(report, &manifest, current_number, timestamp, revision);
+    let snapshot = DerivedSnapshot {
+        version: 1,
+        archive_revision: manifest.archive_revision.clone(),
+        state_revision: current_state.state_revision,
+    };
+    storage::write_index(history_dir, &storage::rebuild_index(report))?;
+    storage::write_manifest(history_dir, &manifest)?;
+    storage::write_state(history_dir, &current_state)?;
+    storage::write_snapshot(history_dir, &snapshot)?;
+    Ok((manifest, current_state))
 }
 
 pub(super) fn tokenize(value: &str) -> Vec<String> {
@@ -103,39 +154,36 @@ fn focus_text(document: Option<&HistoryDocument>) -> String {
         .unwrap_or_else(|| "尚未记录当前焦点".to_string())
 }
 
-fn bounded_progress(report: &ScanReport) -> (Vec<String>, Vec<String>) {
+fn current_progress(document: Option<&HistoryDocument>) -> (Vec<String>, Vec<String>, bool) {
     let mut recent_changes = Vec::new();
     let mut open_items = Vec::new();
-    for document in report.documents.iter().rev() {
-        let records = markdown::parse_checkpoint_records(&document.content);
-        for record in latest_revisions(&records).into_iter().rev() {
-            push_record_progress(record, &mut recent_changes, &mut open_items);
-        }
+    let Some(document) = document else {
+        return (recent_changes, open_items, false);
+    };
+    let records = markdown::parse_checkpoint_records(&document.content);
+    let latest = latest_revisions(&records);
+    for record in latest.iter().rev() {
+        push_recent_changes(record, &mut recent_changes);
     }
-    (recent_changes, open_items)
+    if let Some(record) = latest.last() {
+        push_bounded(
+            &mut open_items,
+            record.remaining_issues.iter().map(String::as_str),
+        );
+        push_bounded(
+            &mut open_items,
+            record.next_actions.iter().map(String::as_str),
+        );
+    }
+    (recent_changes, open_items, !latest.is_empty())
 }
 
-fn push_record_progress(
-    record: &super::model::CheckpointRecord,
-    recent_changes: &mut Vec<String>,
-    open_items: &mut Vec<String>,
-) {
+fn push_recent_changes(record: &super::model::CheckpointRecord, recent_changes: &mut Vec<String>) {
     push_bounded(
         recent_changes,
         record.files_changed.iter().map(String::as_str),
     );
-    push_bounded(
-        recent_changes,
-        record.decisions.iter().map(String::as_str),
-    );
-    push_bounded(
-        open_items,
-        record.remaining_issues.iter().map(String::as_str),
-    );
-    push_bounded(
-        open_items,
-        record.next_actions.iter().map(String::as_str),
-    );
+    push_bounded(recent_changes, record.decisions.iter().map(String::as_str));
 }
 
 fn current_reference(

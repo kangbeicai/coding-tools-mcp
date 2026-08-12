@@ -19,7 +19,7 @@ History Session v2 将当前“bootstrap 回灌全量摘要 + 最新全文”的
 | 档案索引 | `memory/manifest.json` | 保存定位/hash/关键词，不复制正文 | FR-3, FR-4 |
 | 搜索 | Rust 确定性关键词评分 | 零外部依赖，结果可测、可分页 | FR-4 |
 | 读取 | UTF-8-safe byte cursor | 精确无损，单次远程负载有界 | FR-5 |
-| 一致性 | 现有 `fs2` 锁 + 原子 rename | 复用成熟路径，避免并发半写 | FR-2, FR-3 |
+| 一致性 | 现有 `fs2` 锁 + 单文件原子 rename + `memory/snapshot.json` 最后提交标记 | 事实源不变；派生文件跨文件写入中断时可检测 stale/incomplete | FR-2, FR-3 |
 | 敏感信息 | 现有 regex redaction | 保持历史仓库安全边界 | FR-2, NFR-2 |
 
 ### 架构设计
@@ -32,7 +32,7 @@ ChatGPT tools/call
        ├── bootstrap/checkpoint/validate
        ├── search/read
        ├── markdown.rs 事实档案解析/追加/revision/redaction
-       ├── storage.rs  锁/扫描/原子写/state/manifest
+       ├── storage.rs  锁/扫描/原子写/state/manifest/snapshot
        └── model.rs    record/state/manifest/search DTO
 
 docs/history-session/
@@ -42,9 +42,10 @@ docs/history-session/
   memory/
     state.json          <- 有界当前状态，可重建
     manifest.json       <- 有界定位元数据，可重建
+    snapshot.json       <- 派生 generation 最后提交标记，可重建
 ```
 
-核心原则：`N.md` 是唯一不可替代事实；`index.json`、state、manifest 都是派生物。bootstrap、validate 和派生重建不能为了方便而改写旧 `N.md`。
+核心原则：`N.md` 是唯一不可替代事实；`index.json`、state、manifest、snapshot 都是派生物。bootstrap、validate 和派生重建不能为了方便而改写旧 `N.md`。`snapshot.json` 不是跨文件事务，而是最后写入的 commit marker，用于检测派生文件半写入或过期。
 
 ---
 
@@ -52,14 +53,15 @@ docs/history-session/
 
 | 实体/字段 | 类型 | 约束 | 说明 |
 |-----------|------|------|------|
-| `CheckpointRecord.raw_user_input` | String | 缺失允许但 warning | 本轮用户逐字输入（脱敏后） |
+| `CheckpointRecord.raw_user_input` | String | 缺失允许，但 checkpoint 返回 partial fidelity | 本轮用户逐字输入（脱敏后） |
 | `CheckpointRecord.revision` | u64 | 从 1 递增 | 同 turn 的修订序号 |
 | `CheckpointRecord.supersedes` | Option<String> | 指向上一 revision | 保留证据而非覆盖 |
 | `CheckpointRecord.content_hash` | String | SHA-256 | 忽略 timestamp/revision 后的幂等 fingerprint |
 | `InitialInputRecord` | struct | revision + hash | 首次用户输入与修订 |
 | `MemoryManifest` | JSON | version=2 | archive revision + entries |
 | `ManifestEntry` | JSON | 不含正文 | number/path/title/time/bytes/hash/keywords |
-| `MemoryState` | JSON | 严格条目/字符上限 | 当前焦点、近期变化、未决项、有限 references |
+| `MemoryState` | JSON | version=3；严格条目/字符上限 | 当前焦点；当前 session 内近期变化；最新 checkpoint 的未决项快照；有限 references |
+| `DerivedSnapshot` | JSON | version=1 | `archive_revision + state_revision`，在 index/manifest/state 全部写成功后最后提交 |
 | `SearchHit` | JSON | snippet 有界 | search 返回定位结果 |
 
 事实 Markdown 使用追加块：
@@ -94,10 +96,10 @@ docs/history-session/
 | 方法/函数 | 入参 | 出参 | 关联需求 |
 |-----------|------|------|----------|
 | `history_session_bootstrap` | 现有参数 + `initial_user_input` | bounded state、revision、统计、warnings、search/read guide | FR-1, FR-2 |
-| `history_session_checkpoint` | 现有 stable target + `raw_user_input` | revision/supersedes/capture/hash | FR-2 |
+| `history_session_checkpoint` | 现有 stable target + `raw_user_input` | revision/supersedes/capture/hash + `fidelity` + `persistence_complete` | FR-2 |
 | `history_session_search` | `query,cursor,limit,history_dir` | ranked bounded hits + next_cursor | FR-4 |
 | `history_session_read` | `number|path,cursor,max_bytes,expected_hash` | raw page + hash + next_cursor | FR-5 |
-| `history_session_validate` | `repair` | archive/index/state/manifest integrity | FR-3 |
+| `history_session_validate` | `repair` | sequence validity、archive integrity、malformed blocks、派生 freshness/snapshot consistency | FR-3 |
 
 ### Bootstrap 有界策略
 
@@ -176,6 +178,22 @@ docs/specs/history-session-archive/*      # 标记旧全量 bootstrap 设计被 
 **问题**: 网络重试需要幂等，但模型修订也需要证据。
 
 **决策**: 对“同 fingerprint”忽略；对“同 turn 不同 fingerprint”追加 revision/supersedes。
+
+### 决策 5: `open_items` 是当前 session 最新 checkpoint 的状态快照，不是历史事件并集（FR-1, FR-3）
+
+**问题**: v2 初版把所有历史档案的 `remaining_issues/next_actions` 累加到 `state.json`，导致后续已经完成的旧事项仍被投影为当前待办。
+
+**决策**: MemoryState v3 只从当前 session 最新有效 checkpoint 读取 `remaining_issues + next_actions`；当前 session 内的 `recent_changes` 可有界汇总，旧 session 只进入 `references` 并通过 search/read 按需读取。
+
+**理由**: checkpoint 中的未决事项字段语义是“该时刻的当前状态”，后一 checkpoint 的空数组天然表示旧待办已清空，无需文本相似度或 NLP 推断 resolved 状态。
+
+### 决策 6: 解析损坏显式诊断，派生文件用 commit marker 检测不一致（FR-3）
+
+**问题**: v2 初版反序列化失败会静默跳过 JSON block；index/manifest/state 又分别原子替换但不是同一事务。
+
+**决策**: parser 同时返回有效 records 与 diagnostics，scan/validate 暴露 `malformed_blocks` 和 `archive_integrity_valid`。派生写入顺序固定为 index → manifest → state → snapshot，最后的 snapshot 绑定 archive/state revision；validate 对每个派生文件做 freshness 检查并返回 `consistent/stale/incomplete/invalid`。
+
+**理由**: 保留 Markdown 事实源和简单单文件原子写，同时把“静默丢结构化记录”和“半写入看起来像成功”改成可观察、可 repair 的状态。
 
 ---
 

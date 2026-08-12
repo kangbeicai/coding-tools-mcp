@@ -177,16 +177,18 @@ History Session v2 exposes five tools:
 | Tool | Purpose |
 |------|---------|
 | `history_session_bootstrap` | Create or resume the current session and return bounded current state plus retrieval guidance instead of all history |
-| `history_session_checkpoint` | Append structured progress and the current raw user input; changed content for the same turn is retained as revision/supersedes evidence |
-| `history_session_validate` | Validate archive numbering and rebuild `index.json`, `memory/state.json`, and `memory/manifest.json` when requested |
+| `history_session_checkpoint` | Append structured progress and the current raw user input; changed content for the same turn is retained as revision/supersedes evidence, with explicit `fidelity=full/partial` and `persistence_complete` |
+| `history_session_validate` | Validate archive numbering, malformed JSON blocks, and derived-snapshot freshness; rebuild `index.json`, `memory/state.json`, `memory/manifest.json`, and `memory/snapshot.json` when requested |
 | `history_session_search` | Search history archives by deterministic keywords and return bounded locations/snippets |
 | `history_session_read` | Read one numeric Markdown archive losslessly; pages default to 32 KiB and are capped at 64 KiB, with a content hash for change detection |
 
-History remains project-local under each workspace's `docs/history-session/`. Numeric `N.md` files are the durable source of truth; `memory/state.json` and `memory/manifest.json` are bounded derived data that can be rebuilt from Markdown.
+History remains project-local under each workspace's `docs/history-session/`. Numeric `N.md` files are the durable source of truth; `memory/state.json`, `memory/manifest.json`, and `memory/snapshot.json` are bounded derived data that can be rebuilt from Markdown. In MemoryState v3, `open_items` is the `remaining_issues + next_actions` snapshot from the **latest valid checkpoint in the current session only**. Older sessions are no longer merged into current open items; they remain available through `references` and on-demand search/read.
+
+`memory/snapshot.json` is written last as a derived commit marker. It is not a true multi-file transaction, but `history_session_validate` can use it to detect partial writes, missing files, or stale archive revisions. `state_revision` is only a local derived generation and is not guaranteed to be monotonic across rebuilds; use `archive_revision` as the fact-source consistency token.
 
 The `session_key` and `current_path` returned by `history_session_bootstrap` form the stable write target. Every checkpoint must pass them back unchanged as `session_key` and `expected_path`; changing ChatGPT host-session metadata cannot redirect an established checkpoint to another archive.
 
-The server cannot read ChatGPT transcript text that was not supplied as an MCP argument. Use `initial_input_captured`, `user_input_captured`, and returned warnings to determine whether the first/current request was actually archived.
+The server cannot read ChatGPT transcript text that was not supplied as an MCP argument. Use `initial_input_captured` for the first request. A checkpoint represents a full-fidelity save only when `persistence_complete=true` (`fidelity=full`). Without `raw_user_input`, the structured checkpoint is still archived but returns `fidelity=partial` / `persistence_complete=false` and must not be described as fully saved. Persistence remains model-mediated tool calls, not automatic background memory.
 
 ## Verification
 

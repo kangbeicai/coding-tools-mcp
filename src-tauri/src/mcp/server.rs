@@ -51,7 +51,7 @@ fn initialize_result() -> Value {
             "title": "Coding Tools MCP",
             "version": env!("CARGO_PKG_VERSION")
         },
-        "instructions": "Use these tools only for local coding operations inside the configured workspace. At the start of every new ChatGPT conversation, before answering the user's first request, call history_session_bootstrap exactly once and pass the user's verbatim first request as initial_user_input. Treat bootstrap as required conversation initialization: it creates or resumes a lossless Markdown archive and returns bounded current state, not all history. Use history_session_search followed by history_session_read only when exact earlier context is needed. history_session_read returns a bounded UTF-8-safe page; follow next_cursor with the returned content hash until the relevant archive is complete. Repeated successful bootstrap calls in the same conversation resume the same session and must not create duplicates. Preserve session_key and current_path returned by bootstrap, then pass them unchanged as session_key and expected_path to every history_session_checkpoint call. After completing each user-requested task in the conversation, call history_session_checkpoint before the final response and pass that user's verbatim request as raw_user_input. Only state that progress was saved after checkpoint returns ok=true with the same session_key and path. The server cannot access ChatGPT transcript text that was not provided as a tool argument; persistence is not automatic background persistence."
+        "instructions": "Use these tools only for local coding operations inside the configured workspace. At the start of every new ChatGPT conversation, before answering the user's first request, call history_session_bootstrap exactly once and pass the user's verbatim first request as initial_user_input. Treat bootstrap as required conversation initialization: it creates or resumes a lossless Markdown archive and returns bounded current-session state; older sessions are references for on-demand search/read and are not merged into current open items. Use history_session_search followed by history_session_read only when exact earlier context is needed. history_session_read returns a bounded UTF-8-safe page; follow next_cursor with the returned content hash until the relevant archive is complete. Repeated successful bootstrap calls in the same conversation resume the same session and must not create duplicates. Preserve session_key and current_path returned by bootstrap, then pass them unchanged as session_key and expected_path to every history_session_checkpoint call. After completing each user-requested task in the conversation, call history_session_checkpoint before the final response and pass that user's verbatim request as raw_user_input. Only state that the task was fully saved when checkpoint returns ok=true with the same session_key/path and persistence_complete=true. When fidelity=partial or persistence_complete=false, describe the checkpoint as partially archived rather than fully saved. The server cannot access ChatGPT transcript text that was not provided as a tool argument; persistence is not automatic background persistence."
     })
 }
 
@@ -144,7 +144,9 @@ mod tests {
         assert!(instructions.contains("session_key and expected_path"));
         assert!(instructions.contains("After completing each user-requested task"));
         assert!(instructions.contains("before the final response"));
-        assert!(instructions.contains("checkpoint returns ok=true"));
+        assert!(instructions.contains("persistence_complete=true"));
+        assert!(instructions.contains("fidelity=partial"));
+        assert!(instructions.contains("older sessions are references"));
         assert!(instructions.contains("not automatic background persistence"));
     }
 

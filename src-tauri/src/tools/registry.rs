@@ -36,7 +36,7 @@ pub const P0_TOOLS: &[(&str, &str, &str, bool, bool, bool)] = &[
     (
         "history_session_checkpoint",
         "Save development checkpoint",
-        "Append an idempotent, redacted development checkpoint. Pass session_key and expected_path exactly as returned by history_session_bootstrap, plus the user's verbatim raw_user_input; the server cannot read ChatGPT transcripts that were not passed as arguments. Changed content for the same turn_id is preserved as a revision.",
+        "Append an idempotent, redacted development checkpoint. Pass session_key and expected_path exactly as returned by history_session_bootstrap, plus the user's verbatim raw_user_input. The result explicitly reports fidelity=full/partial and persistence_complete; changed content for the same turn_id is preserved as a revision.",
         false,
         false,
         false,
@@ -44,7 +44,7 @@ pub const P0_TOOLS: &[(&str, &str, &str, bool, bool, bool)] = &[
     (
         "history_session_validate",
         "Validate session archive",
-        "Validate history numbering, files, session mappings, and optionally rebuild the derived index without deleting history.",
+        "Validate history numbering, files, session mappings, malformed structured blocks, and derived snapshot freshness; optionally rebuild derived files without deleting Markdown history.",
         false,
         false,
         false,

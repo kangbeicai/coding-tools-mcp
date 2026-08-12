@@ -160,23 +160,7 @@ fn refresh_derived(
     current_number: u64,
 ) -> WorkspaceResult<(MemoryManifest, MemoryState)> {
     let report = storage::scan(&ctx.workspace, history_dir)?;
-    let manifest = state::build_manifest(&report);
-    let revision = storage::read_state(history_dir)
-        .ok()
-        .flatten()
-        .map(|state| state.state_revision + 1)
-        .unwrap_or(1);
-    let current_state = state::build_state(
-        &report,
-        &manifest,
-        Some(current_number),
-        &now_timestamp(),
-        revision,
-    );
-    storage::write_index(history_dir, &storage::rebuild_index(&report))?;
-    storage::write_manifest(history_dir, &manifest)?;
-    storage::write_state(history_dir, &current_state)?;
-    Ok((manifest, current_state))
+    state::refresh_derived(history_dir, &report, Some(current_number), &now_timestamp())
 }
 
 fn checkpoint_result(
@@ -187,6 +171,11 @@ fn checkpoint_result(
     current_state: &MemoryState,
 ) -> Value {
     let warnings = checkpoint_warnings(outcome, target.host_mismatch);
+    let fidelity = if outcome.user_input_captured {
+        "full"
+    } else {
+        "partial"
+    };
     tool_ok(json!({
         "session_number": document.number,
         "path": document.path,
@@ -200,9 +189,12 @@ fn checkpoint_result(
         "updated": outcome.updated,
         "duplicate_ignored": outcome.duplicate_ignored,
         "user_input_captured": outcome.user_input_captured,
+        "fidelity": fidelity,
+        "persistence_complete": outcome.user_input_captured,
         "content_hash": storage::sha256(outcome.content.as_bytes()),
         "archive_revision": manifest.archive_revision,
         "state_revision": current_state.state_revision,
+        "state_revision_monotonic": false,
         "warnings": warnings
     }))
 }

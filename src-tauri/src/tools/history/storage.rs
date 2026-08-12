@@ -10,13 +10,30 @@ use crate::tools::workspace::{relative_display, Workspace, WorkspaceError, Works
 
 use super::markdown;
 use super::model::{
-    HistoryDocument, HistoryIndex, IndexEntry, MemoryManifest, MemoryState, ScanReport,
+    DerivedSnapshot, HistoryDocument, HistoryIndex, IndexEntry, MalformedHistoryBlock,
+    MemoryManifest, MemoryState, ScanReport,
 };
 
 pub const DEFAULT_HISTORY_DIR: &str = "docs/history-session";
 
 pub struct HistoryLock {
     file: File,
+}
+
+pub fn read_snapshot(history_dir: &Path) -> WorkspaceResult<Option<DerivedSnapshot>> {
+    read_json(
+        &memory_dir(history_dir).join("snapshot.json"),
+        "HISTORY_SNAPSHOT_INVALID",
+        "History derived snapshot",
+    )
+}
+
+pub fn write_snapshot(history_dir: &Path, snapshot: &DerivedSnapshot) -> WorkspaceResult<()> {
+    write_json(
+        &memory_dir(history_dir).join("snapshot.json"),
+        snapshot,
+        "history derived snapshot",
+    )
 }
 
 impl Drop for HistoryLock {
@@ -155,9 +172,22 @@ pub fn scan(workspace: &Workspace, history_dir: &Path) -> WorkspaceResult<ScanRe
         if content.trim().is_empty() {
             report.empty_files.push(name.clone());
         }
+        let relative_path = relative_display(workspace.root(), &path);
+        append_parse_diagnostics(
+            &mut report,
+            &relative_path,
+            "initial_input",
+            markdown::parse_initial_input_records_with_diagnostics(&content).diagnostics,
+        );
+        append_parse_diagnostics(
+            &mut report,
+            &relative_path,
+            "checkpoint",
+            markdown::parse_checkpoint_records_with_diagnostics(&content).diagnostics,
+        );
         report.documents.push(HistoryDocument {
             number,
-            path: relative_display(workspace.root(), &path),
+            path: relative_path,
             session_key: markdown::metadata(&content, "Session key"),
             created_at: markdown::metadata(&content, "Created"),
             updated_at: markdown::metadata(&content, "Updated"),
@@ -191,6 +221,25 @@ pub fn scan(workspace: &Workspace, history_dir: &Path) -> WorkspaceResult<ScanRe
         .filter_map(|(key, count)| (count > 1).then_some(key))
         .collect();
     Ok(report)
+}
+
+fn append_parse_diagnostics(
+    report: &mut ScanReport,
+    path: &str,
+    section: &str,
+    diagnostics: Vec<markdown::JsonBlockDiagnostic>,
+) {
+    report.malformed_blocks.extend(
+        diagnostics
+            .into_iter()
+            .map(|diagnostic| MalformedHistoryBlock {
+                path: path.to_string(),
+                section: section.to_string(),
+                block_index: diagnostic.block_index,
+                line: diagnostic.line,
+                error: diagnostic.error,
+            }),
+    );
 }
 
 pub fn rebuild_index(report: &ScanReport) -> HistoryIndex {

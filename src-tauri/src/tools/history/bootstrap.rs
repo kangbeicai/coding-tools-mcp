@@ -18,7 +18,18 @@ pub(super) fn bootstrap(ctx: &ToolContext, args: &Value) -> WorkspaceResult<Valu
     let mut warnings = bootstrap_warnings(&history_dir, &identity);
     let session = resolve_session(ctx, args, &history_dir, &report, &identity, &mut warnings)?;
     let refreshed = checked_report(ctx, &history_dir)?;
-    let (manifest, current_state) = refresh_derived(&history_dir, &refreshed, session.number)?;
+    let (manifest, current_state) = state::refresh_derived(
+        &history_dir,
+        &refreshed,
+        Some(session.number),
+        &now_timestamp(),
+    )?;
+    if !refreshed.malformed_blocks.is_empty() {
+        warnings.push(
+            "历史档案包含无法解析的结构化记录；有效记录仍可读取，请运行 history_session_validate 查看 malformed_blocks。"
+                .into(),
+        );
+    }
     let mut result = bootstrap_result(
         &identity,
         &session,
@@ -246,30 +257,6 @@ fn missing_initial_input_warning() -> String {
     "未提供 initial_user_input；服务端无法读取未作为工具参数传入的首次用户输入。".into()
 }
 
-fn refresh_derived(
-    history_dir: &std::path::Path,
-    report: &ScanReport,
-    current_number: u64,
-) -> WorkspaceResult<(MemoryManifest, MemoryState)> {
-    let manifest = state::build_manifest(report);
-    let revision = storage::read_state(history_dir)
-        .ok()
-        .flatten()
-        .map(|state| state.state_revision + 1)
-        .unwrap_or(1);
-    let current_state = state::build_state(
-        report,
-        &manifest,
-        Some(current_number),
-        &now_timestamp(),
-        revision,
-    );
-    storage::write_index(history_dir, &storage::rebuild_index(report))?;
-    storage::write_manifest(history_dir, &manifest)?;
-    storage::write_state(history_dir, &current_state)?;
-    Ok((manifest, current_state))
-}
-
 fn bootstrap_result(
     identity: &BootstrapIdentity,
     session: &BootstrapSession,
@@ -289,14 +276,17 @@ fn bootstrap_result(
         "resumed": session.resumed,
         "initial_input_captured": session.initial_input_captured,
         "sequence_valid": report.sequence_valid(),
+        "archive_integrity_valid": report.archive_integrity_valid(),
+        "malformed_blocks": report.malformed_blocks,
         "history_count": report.documents.len(),
         "total_history_bytes": report.total_bytes(),
         "state_revision": current_state.state_revision,
+        "state_revision_monotonic": false,
         "archive_revision": manifest.archive_revision,
         "state": current_state,
         "history_read_mode": "bounded_state_with_on_demand_search_and_read",
         "persistence_mode": "model_mediated_tool_calls",
-        "assistant_instructions": "Use the bounded state to begin work. To recover exact earlier context, call history_session_search and then history_session_read for only the relevant archive. Preserve session_key and current_path. Before the final response for each user task, call history_session_checkpoint with the user's verbatim raw_user_input. The server can only save text passed as tool arguments and reports missing input explicitly.",
+        "assistant_instructions": "Use the bounded current-session state to begin work. Older sessions are references, not current open items. To recover exact earlier context, call history_session_search and then history_session_read for only the relevant archive. Preserve session_key and current_path. Before the final response for each user task, call history_session_checkpoint with the user's verbatim raw_user_input. Treat persistence as fully complete only when the checkpoint returns persistence_complete=true; a partial checkpoint is still archived but is not a full-fidelity save.",
         "required_next_actions": [
             "review_bounded_state",
             "search_or_read_relevant_archives_when_precision_is_needed",

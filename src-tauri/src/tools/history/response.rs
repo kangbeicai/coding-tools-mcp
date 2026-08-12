@@ -53,6 +53,7 @@ fn reduce_state(result: &mut Value) {
     if let Some(state) = result.get_mut("state").and_then(Value::as_object_mut) {
         state.insert("recent_changes".into(), json!([]));
         state.insert("open_items".into(), json!([]));
+        state.insert("open_items_source".into(), Value::Null);
         state.insert("references".into(), json!([]));
         state.insert(
             "current_focus".into(),
@@ -66,7 +67,7 @@ fn reduce_state(result: &mut Value) {
 
 fn derived_files(
     history_dir: &std::path::Path,
-) -> [(&'static str, crate::tools::workspace::WorkspaceResult<bool>); 3] {
+) -> [(&'static str, crate::tools::workspace::WorkspaceResult<bool>); 4] {
     [
         (
             "历史索引",
@@ -79,6 +80,10 @@ fn derived_files(
         (
             "memory/state.json",
             storage::read_state(history_dir).map(|value| value.is_some()),
+        ),
+        (
+            "memory/snapshot.json",
+            storage::read_snapshot(history_dir).map(|value| value.is_some()),
         ),
     ]
 }

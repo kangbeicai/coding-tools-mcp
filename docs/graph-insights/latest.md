@@ -37,6 +37,8 @@ GitHub 发布链重新建立为 Headless-only：`v*` tag 或手动指定已有 t
 - `platform()` 是 OS primitive 的全局高影响入口：Linux 返回 `LinuxPlatform`，Windows 返回 `WindowsPlatform`，调用方契约保持一致。
 - Headless foreground 摘要不再把 `0.0.0.0` 当作浏览器 URL：默认 Web Admin 区块输出可复制的 `Local=http://127.0.0.1:<port>` 和 OS 路由选择得到的实际 LAN IPv4；探测失败时只省略 LAN，不改变 listener。
 - `Platform::app_config_dir()` 现在经 shared path helper 统一到 `coding-tools-mcp` 根目录；仅当 canonical 不存在且 legacy `coding-tools-mcp-desktop` 存在时整体 rename，失败则保持 legacy 可用，新旧并存禁止隐式 merge。
+- History Session 派生状态升级为 MemoryState v3：`open_items` 只取当前 session 最新有效 checkpoint 的 `remaining_issues + next_actions` 快照；旧 session 仅保留在 references/search/read，不再跨会话累加污染当前状态。
+- History Markdown parser 现在保留有效 records 的同时返回 malformed JSON diagnostics；validate 分离 `sequence_valid` 与 `archive_integrity_valid`，并通过最后写入的 `memory/snapshot.json` 检测派生 index/manifest/state 的 stale/incomplete/invalid 状态。
 - Activity 后端仍保存原始结构化调用信息；Web `/activity` 通过 `min-w-0/max-w-full/break-all/overflow-auto` 约束长 JSON、长 ID 和长命令，不再让内容扩大页面宽度。
 
 ## 本轮影响评估
@@ -50,6 +52,7 @@ GitHub 发布链重新建立为 Headless-only：`v*` tag 或手动指定已有 t
 | Activity long-content containment | Low | Svelte check 0 error/0 warning，生产 build 通过 |
 | Headless Local/LAN startup summary | Low | `run_server` upstream impact LOW；URL/bind/filter 专项 6/6 |
 | Config root migration | Low / Windows index unknown | trait/Linux impact LOW；迁移专项 4/4，Windows 复用 shared helper |
+| History current-state projection | GitNexus private-symbol index unknown | 原因层改为 current-session latest checkpoint snapshot；History 专项 22/22、Rust 全量 213/213 |
 | Docs/workflows/assets | Low | 不影响运行时 |
 
 ## 验证证据
@@ -57,14 +60,14 @@ GitHub 发布链重新建立为 Headless-only：`v*` tag 或手动指定已有 t
 - `npm run check`：0 errors、0 warnings。
 - `npm run build`：通过，静态 Web Console 写入 `build/`。
 - `cargo check --manifest-path src-tauri/Cargo.toml --all-targets`：通过。
-- `cargo test --manifest-path src-tauri/Cargo.toml --all-targets`：209 项通过。
+- `cargo test --manifest-path src-tauri/Cargo.toml --all-targets`：213 项通过。
 - `cargo build --release --manifest-path src-tauri/Cargo.toml --bin coding-tools`：通过。
 - v0.1.34 GitHub Release 已在 native Windows x86_64 / Linux arm64 / Linux x86_64 runners 成功完成；本轮新增 config-root shared helper 的 Windows native 编译仍待下一次 Release/manual dry-run 再验证。
 - `npm run check`：0 errors、0 warnings；`npm run build`：通过。
 
 ## GitNexus 状态
 
-本轮已对 `run_server`、`print_help` 和 `app_config_dir` 做修改前 impact；提交前继续执行 staged `gitnexus detect-changes`，以当前 staged 结果作为最终风险结论。
+Headless 改动已对 `run_server`、`print_help` 和 `app_config_dir` 做修改前 impact。History 私有 helper 未被当前 GitNexus Rust 索引识别，已对公共调用边界做源码取证并以 staged `gitnexus detect-changes` 作为最终风险结论。
 
 ## 剩余风险
 

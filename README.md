@@ -220,16 +220,18 @@ History Session v2 的五个工具：
 | 工具 | 作用 |
 |------|------|
 | `history_session_bootstrap` | 创建或恢复当前会话，只返回有界当前状态和检索指引，不回灌全部历史 |
-| `history_session_checkpoint` | 向当前会话追加结构化进度与本轮原始用户输入；同一 turn 的修改保留 revision/supersedes 证据 |
-| `history_session_validate` | 校验档案编号和派生索引，可重建 `index.json`、`memory/state.json`、`memory/manifest.json` |
+| `history_session_checkpoint` | 向当前会话追加结构化进度与本轮原始用户输入；同一 turn 的修改保留 revision/supersedes 证据，并显式返回 `fidelity=full/partial` 与 `persistence_complete` |
+| `history_session_validate` | 校验档案编号、malformed JSON block 与派生快照 freshness，可重建 `index.json`、`memory/state.json`、`memory/manifest.json`、`memory/snapshot.json` |
 | `history_session_search` | 按关键词搜索历史档案，返回有界的定位结果和片段 |
 | `history_session_read` | 无损读取一个数字 Markdown 档案；默认每页 32 KiB，最大 64 KiB，可用 hash 检测翻页期间的内容变化 |
 
-项目历史保存在各工作区自己的 `docs/history-session/`，不是全局共享历史。数字 Markdown `N.md` 是长期事实源；`memory/state.json` 和 `memory/manifest.json` 只是可从 Markdown 重建的有界派生数据。
+项目历史保存在各工作区自己的 `docs/history-session/`，不是全局共享历史。数字 Markdown `N.md` 是长期事实源；`memory/state.json`、`memory/manifest.json` 和 `memory/snapshot.json` 都是可从 Markdown 重建的有界派生数据。MemoryState v3 的 `open_items` 只表示**当前 session 最新有效 checkpoint** 的 `remaining_issues + next_actions` 快照；旧 session 不再直接合并进当前待办，只通过 `references` 和按需 search/read 提供上下文。
+
+`memory/snapshot.json` 是派生文件的最后提交标记：它不能把多个文件写入变成真正的跨文件事务，但可以让 `history_session_validate` 检测中途失败、缺文件或 archive revision 已变化造成的 stale/incomplete 派生状态。`state_revision` 只是本地派生 generation，不保证长期单调；跨重建判断事实新旧应使用 `archive_revision`。
 
 `history_session_bootstrap` 返回的 `session_key` 和 `current_path` 是稳定写入目标。后续 checkpoint 必须原样作为 `session_key` 和 `expected_path` 传回；即使 ChatGPT 的宿主会话元数据变化，也不会把已建立的 checkpoint 重定向到其他历史文件。
 
-服务端无法读取没有作为 MCP 参数传入的 ChatGPT 对话文本。因此首次输入和每轮输入是否完整归档，以 `initial_input_captured` / `user_input_captured` 及返回的 warnings 为准。
+服务端无法读取没有作为 MCP 参数传入的 ChatGPT 对话文本。因此首次输入是否捕获以 `initial_input_captured` 为准；每轮 checkpoint 只有在 `persistence_complete=true`（`fidelity=full`）时才代表完整保存。缺少 `raw_user_input` 时 checkpoint 仍会持久化结构化进度，但返回 `fidelity=partial` / `persistence_complete=false`，不应表述为完整保存。该机制仍是 `model_mediated_tool_calls`，不是服务端自动后台记忆。
 
 ## 开发验证
 
