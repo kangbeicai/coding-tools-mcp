@@ -5,6 +5,7 @@
 mod systemd;
 
 use std::io::{self, Write};
+use std::net::{IpAddr, Ipv4Addr, UdpSocket};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -37,6 +38,71 @@ pub fn run_from_env() -> Result<(), String> {
         Some(other) => Err(format!(
             "未知命令: {other}\n运行 `coding-tools --help` 查看用法"
         )),
+    }
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+struct AdminAccessUrls {
+    local: Option<String>,
+    lan: Option<String>,
+    direct: Option<String>,
+}
+
+fn detect_lan_ipv4() -> Option<Ipv4Addr> {
+    let socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)).ok()?;
+    socket.connect((Ipv4Addr::new(192, 0, 2, 1), 9)).ok()?;
+    match socket.local_addr().ok()?.ip() {
+        IpAddr::V4(ip) if is_usable_lan_ipv4(ip) => Some(ip),
+        _ => None,
+    }
+}
+
+fn is_usable_lan_ipv4(ip: Ipv4Addr) -> bool {
+    !ip.is_unspecified()
+        && !ip.is_loopback()
+        && !ip.is_link_local()
+        && !ip.is_multicast()
+        && !ip.is_broadcast()
+}
+
+fn admin_access_urls(bind_host: &str, port: u16, lan_ip: Option<Ipv4Addr>) -> AdminAccessUrls {
+    let bind_host = bind_host.trim();
+    if bind_host.eq_ignore_ascii_case("localhost") {
+        return AdminAccessUrls {
+            local: Some(format!("http://127.0.0.1:{port}")),
+            ..Default::default()
+        };
+    }
+
+    match bind_host.parse::<IpAddr>() {
+        Ok(IpAddr::V4(ip)) if ip.is_unspecified() => AdminAccessUrls {
+            local: Some(format!("http://127.0.0.1:{port}")),
+            lan: lan_ip
+                .filter(|ip| is_usable_lan_ipv4(*ip))
+                .map(|ip| format!("http://{ip}:{port}")),
+            direct: None,
+        },
+        Ok(IpAddr::V4(ip)) if ip.is_loopback() => AdminAccessUrls {
+            local: Some(format!("http://{ip}:{port}")),
+            ..Default::default()
+        },
+        Ok(IpAddr::V4(ip)) => AdminAccessUrls {
+            lan: Some(format!("http://{ip}:{port}")),
+            ..Default::default()
+        },
+        Ok(IpAddr::V6(ip)) if ip.is_unspecified() => AdminAccessUrls {
+            local: Some(format!("http://[::1]:{port}")),
+            ..Default::default()
+        },
+        Ok(IpAddr::V6(ip)) if ip.is_loopback() => AdminAccessUrls {
+            local: Some(format!("http://[{ip}]:{port}")),
+            ..Default::default()
+        },
+        Ok(IpAddr::V6(ip)) => AdminAccessUrls {
+            direct: Some(format!("http://[{ip}]:{port}")),
+            ..Default::default()
+        },
+        Err(_) => AdminAccessUrls::default(),
     }
 }
 
@@ -281,6 +347,7 @@ fn run_server(tui: bool, args: &[String]) -> Result<(), String> {
         .with_settings(|store| Ok(store.settings().admin))
         .map_err(|error| error.to_string())?;
     let admin_port = admin_config.local_port;
+    let admin_bind_host = admin_config.bind_host.clone();
     let admin_configured = !admin_config.password_hash.trim().is_empty();
     let admin = spawn_admin_listener(app.clone(), admin_config, web_root)?;
     let gateway_start = crate::async_runtime::block_on(start_gateway_service(&app));
@@ -302,8 +369,9 @@ fn run_server(tui: bool, args: &[String]) -> Result<(), String> {
     if tui {
         run_terminal_ui(app, admin)
     } else {
+        let access_urls = admin_access_urls(&admin_bind_host, admin_port, detect_lan_ipv4());
         println!("Coding Tools");
-        println!("  Mode        : foreground (Ctrl+C to stop)");
+        println!("  Mode        : foreground");
         match gateway_start {
             Ok(gateway) => {
                 println!("  MCP Gateway: {}", gateway.local_endpoint);
@@ -336,17 +404,27 @@ fn run_server(tui: bool, args: &[String]) -> Result<(), String> {
                 }
             }
         }
-        println!("  Web Admin  : {}", admin.local_endpoint);
         println!("  Web Console: {}", admin.web_source);
         println!();
-        println!("Web Admin access:");
-        println!("  listen: {}", admin.local_endpoint);
-        println!("  from LAN: http://<server-ip>:{admin_port}");
-        if admin_configured {
-            println!("  auth: administrator login required");
-        } else {
-            println!("  auth: first-time administrator setup required at /login");
+        println!("Web Admin");
+        if let Some(url) = access_urls.local.as_deref() {
+            println!("  Local : {url}");
         }
+        if let Some(url) = access_urls.lan.as_deref() {
+            println!("  LAN   : {url}");
+        }
+        if let Some(url) = access_urls.direct.as_deref() {
+            println!("  URL   : {url}");
+        }
+        if access_urls == AdminAccessUrls::default() {
+            println!("  URL   : {}", admin.local_endpoint);
+        }
+        if admin_configured {
+            println!("  Auth  : administrator login required");
+        } else {
+            println!("  Auth  : first-time administrator setup required at /login");
+        }
+        println!();
         println!("Press Ctrl+C to stop.");
 
         crate::async_runtime::block_on(async {
@@ -618,8 +696,7 @@ fn print_help() {
     println!("  cargo build --release --manifest-path src-tauri/Cargo.toml --bin coding-tools");
     println!("  The Web Console built above is embedded into the headless binary.");
     println!();
-    println!("LAN Web Console:");
-    println!("  http://<server-ip>:28767");
+    println!("Web Admin defaults to 0.0.0.0:28767 and the startup summary prints copyable Local/LAN URLs.");
     println!();
     println!("Advanced optional service mode (Linux/systemd only):");
     println!("  coding-tools service install|status|uninstall");
@@ -649,5 +726,52 @@ mod tests {
             settings.shared_secrets.get("bearer_token").map(String::as_str),
             Some("keep-me")
         );
+    }
+
+    #[test]
+    fn default_admin_bind_exposes_copyable_local_and_lan_urls() {
+        let urls = admin_access_urls("0.0.0.0", 28767, Some(Ipv4Addr::new(192, 168, 1, 23)));
+
+        assert_eq!(urls.local.as_deref(), Some("http://127.0.0.1:28767"));
+        assert_eq!(urls.lan.as_deref(), Some("http://192.168.1.23:28767"));
+        assert!(urls.direct.is_none());
+    }
+
+    #[test]
+    fn default_admin_bind_omits_lan_when_detection_is_unavailable() {
+        let urls = admin_access_urls("0.0.0.0", 28767, None);
+
+        assert_eq!(urls.local.as_deref(), Some("http://127.0.0.1:28767"));
+        assert!(urls.lan.is_none());
+    }
+
+    #[test]
+    fn explicit_admin_bind_never_claims_unbound_localhost_access() {
+        let urls = admin_access_urls("10.0.0.8", 28767, Some(Ipv4Addr::new(192, 168, 1, 23)));
+
+        assert!(urls.local.is_none());
+        assert_eq!(urls.lan.as_deref(), Some("http://10.0.0.8:28767"));
+    }
+
+    #[test]
+    fn loopback_admin_bind_only_exposes_local_url() {
+        let urls = admin_access_urls("127.0.0.1", 28767, Some(Ipv4Addr::new(192, 168, 1, 23)));
+
+        assert_eq!(urls.local.as_deref(), Some("http://127.0.0.1:28767"));
+        assert!(urls.lan.is_none());
+    }
+
+    #[test]
+    fn lan_ip_filter_rejects_non_routable_display_addresses() {
+        for ip in [
+            Ipv4Addr::UNSPECIFIED,
+            Ipv4Addr::LOCALHOST,
+            Ipv4Addr::new(169, 254, 1, 10),
+            Ipv4Addr::new(224, 0, 0, 1),
+            Ipv4Addr::BROADCAST,
+        ] {
+            assert!(!is_usable_lan_ipv4(ip), "{ip} should not be displayed");
+        }
+        assert!(is_usable_lan_ipv4(Ipv4Addr::new(192, 168, 1, 23)));
     }
 }

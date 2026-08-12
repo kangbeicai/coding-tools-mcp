@@ -121,7 +121,8 @@ Supported flags are `--bind`, `--port`, `--public-url`, `--auth`, `--admin-bind`
 On first use, open:
 
 ```text
-http://<server-ip>:28767/login
+Local:  http://127.0.0.1:28767/login
+LAN:    append /login to the actual LAN URL printed in the startup summary
 ```
 
 The page asks you to create the administrator username and password. The password is never stored in plaintext; only its Argon2 hash is persisted. After login the browser uses an HttpOnly, SameSite=Strict session cookie. Sessions last up to 12 hours and are stored only in the `coding-tools` process, so restarting the service invalidates all Admin sessions.
@@ -134,18 +135,18 @@ coding-tools admin reset
 
 The command only restores the Admin username to the default `admin` value and clears the Admin password hash. It does not change Gateway, MCP, OAuth, Cloudflare/FRP, workspace, or other secret configuration.
 
-The reset command updates persisted configuration, while an already running `coding-tools` process still has the old settings in memory. Restart the service after the reset, then open `/login` again and create the administrator credentials. The original password cannot be recovered from the Argon2 hash; it can only be reset.
+The reset command updates persisted configuration, while an already running `coding-tools` process still has the old settings in memory. Restart the service after the reset, then open `http://127.0.0.1:28767/login` locally, or append `/login` to the actual `LAN` URL printed in the startup summary. The original password cannot be recovered from the Argon2 hash; it can only be reset.
 
 ## Configuration
 
-For compatibility with existing installations, the configuration directory keeps its historical name:
+The canonical configuration directory is now:
 
 ```text
-Linux:   ~/.config/coding-tools-mcp-desktop/
-Windows: %APPDATA%\coding-tools-mcp-desktop\
+Linux:   ~/.config/coding-tools-mcp/
+Windows: %APPDATA%\coding-tools-mcp\
 ```
 
-The `desktop` suffix is only a legacy data-path name. The current Linux and Windows product remains headless/browser-based and does not start a desktop UI. Workspaces, Gateway settings, credentials, and tunnel configuration continue to use this location.
+Upgrade compatibility is automatic: when the canonical directory does not yet exist but the historical `coding-tools-mcp-desktop` directory does, `coding-tools` first tries to rename the entire legacy root to the canonical root. This keeps workspaces, Gateway/Admin settings, credentials, tunnel binaries/caches, and logs together. If the rename fails, the current run keeps using the legacy root without deleting data. If both roots already exist, the canonical root wins and they are not merged automatically.
 
 Workspace paths are absolute paths on the server, such as `/home/user/projects/example`.
 

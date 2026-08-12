@@ -136,7 +136,8 @@ coding-tools serve \
 第一次打开 Web Console 时访问：
 
 ```text
-http://<server-ip>:28767/login
+本机：    http://127.0.0.1:28767/login
+局域网：  使用启动摘要中 LAN 行的实际 URL 并追加 /login
 ```
 
 页面会要求创建管理员用户名和密码。密码不会以明文保存，配置中只持久化 Argon2 密码哈希。登录成功后浏览器使用 HttpOnly、SameSite=Strict 的 session cookie；session 最长有效 12 小时，并且只保存在 `coding-tools` 进程内存中，因此服务重启后所有 Web Admin session 都会失效。
@@ -152,21 +153,21 @@ coding-tools admin reset
 reset 修改的是磁盘配置；正在运行的 `coding-tools` 仍持有旧的内存配置。因此 reset 后必须重启服务，然后重新打开：
 
 ```text
-http://<server-ip>:28767/login
+http://127.0.0.1:28767/login
 ```
 
-重新设置管理员即可。密码不可从 Argon2 哈希中找回，只能通过该流程重置。
+如果从局域网设备操作，则使用启动摘要中 `LAN` 行给出的实际地址并追加 `/login`。重新设置管理员即可。密码不可从 Argon2 哈希中找回，只能通过该流程重置。
 
 ## 配置与数据
 
-为兼容已部署实例，配置目录继续保留历史名称：
+当前配置目录：
 
 ```text
-Linux:   ~/.config/coding-tools-mcp-desktop/
-Windows: %APPDATA%\coding-tools-mcp-desktop\
+Linux:   ~/.config/coding-tools-mcp/
+Windows: %APPDATA%\coding-tools-mcp\
 ```
 
-目录名中的 `desktop` 只是兼容旧安装的数据路径；当前 Linux/Windows 版本均为 Headless/Web 形态，不会启动桌面 UI。工作区、Gateway、认证密钥和隧道配置继续从原位置读取。
+升级兼容：如果新目录尚不存在而历史 `coding-tools-mcp-desktop` 目录存在，`coding-tools` 会在首次访问配置时尝试把整个旧目录 rename 为新目录，因此 workspace、Gateway、Admin、认证密钥、Cloudflare/FRP 缓存和日志会一起保留。若 rename 失败，本次运行继续使用旧目录且不会删除旧数据；如果新旧目录同时存在，则新目录优先，不会自动合并或覆盖旧目录。
 
 工作区注册的是服务器本机绝对路径，例如：
 

@@ -9,7 +9,7 @@
 **保留**
 - `/settings/gateway`、`/settings/keys`、`/web/workspace/[id]`。
 - 工作区 CRUD、共享密钥、Gateway、健康检查、FRP Profile 列表和 managed exposure。
-- Linux 配置目录 `~/.config/coding-tools-mcp-desktop`，避免已有部署丢失数据。
+- 该历史规格最初要求保留 `~/.config/coding-tools-mcp-desktop` 以避免已有部署丢失数据；现已由 `coding-tools-headless` 规格的自动目录迁移方案取代，canonical 路径为 `~/.config/coding-tools-mcp/`。
 - 现有 MCP 工具、Gateway 多工作区会话和 tunnel 实现。
 
 **删除**

@@ -27,6 +27,6 @@
 
 - 写代码前遵循 `AGENTS.md` 和 MCP Probe Kit 工作流。
 - 大改前做影响分析；规格型功能通过 `check_spec` 后再实施。
-- 配置目录暂时保留 `~/.config/coding-tools-mcp-desktop`，不得无迁移方案改名。
+- canonical 配置目录为 Linux `~/.config/coding-tools-mcp/` / Windows `%APPDATA%\coding-tools-mcp\`；历史 `coding-tools-mcp-desktop` 仅作为升级迁移来源。新目录缺失且旧目录存在时优先整体 rename，失败则本次继续兼容旧目录；新旧并存时禁止自动 merge。
 - Web Admin 默认监听可信 LAN，尚无独立管理员认证，不得直接暴露公网。
 - `old/` 是旧 Python/桌面参考实现，不属于当前产品运行时。
