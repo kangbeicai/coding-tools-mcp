@@ -254,6 +254,8 @@ pub async fn spawn_cloudflare_tunnel(
     } else {
         cmd.args([
             "tunnel",
+            "--protocol",
+            "http2",
             "run",
             "--token",
             cloudflare_token.trim(),
@@ -382,9 +384,7 @@ async fn stream_cloudflare_output<R, E>(
             }
         } else {
             let lowered = line.to_ascii_lowercase();
-            if lowered.contains("registered tunnel connection")
-                || lowered.contains("starting metrics server")
-            {
+            if is_named_tunnel_ready_line(&lowered) {
                 send_ready(ready_tx, Some(named_url.clone()), true);
             }
         }
@@ -424,6 +424,10 @@ async fn stream_cloudflare_output<R, E>(
     send_ready(&mut ready_tx, public_url, !quick);
 }
 
+fn is_named_tunnel_ready_line(lowered_line: &str) -> bool {
+    lowered_line.contains("registered tunnel connection")
+}
+
 pub async fn stop_child(mut child: Child, pid: Option<u32>) -> AppResult<()> {
     if let Some(pid) = pid {
         let _ = platform().terminate_process_tree(pid);
@@ -436,7 +440,10 @@ pub async fn stop_child(mut child: Child, pid: Option<u32>) -> AppResult<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{cloudflared_release_asset, extract_trycloudflare_url, install_cloudflared_binary};
+    use super::{
+        cloudflared_release_asset, extract_trycloudflare_url, install_cloudflared_binary,
+        is_named_tunnel_ready_line,
+    };
 
     #[test]
     fn extracts_trycloudflare_url_from_log_line() {
@@ -451,6 +458,16 @@ mod tests {
     fn ignores_invalid_hosts() {
         let line = "https://bad_host.trycloudflare.com";
         assert!(extract_trycloudflare_url(line).is_none());
+    }
+
+    #[test]
+    fn named_tunnel_waits_for_registered_edge_connection() {
+        assert!(!is_named_tunnel_ready_line(
+            "inf starting metrics server on 127.0.0.1:20241/metrics"
+        ));
+        assert!(is_named_tunnel_ready_line(
+            "inf registered tunnel connection connindex=0 protocol=http2"
+        ));
     }
 
     #[test]
